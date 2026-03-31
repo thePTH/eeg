@@ -4,5 +4,5 @@ __pycache__/
 .DS_Store
 .ipynb_checkpoints/
 .env
-eeg_venv/
+env/
 computed_data/
