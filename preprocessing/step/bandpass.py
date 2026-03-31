@@ -18,7 +18,7 @@ class BandpassFilterStep(PreprocessingStep):
     def transform(self, eeg_data):
         l_freq, h_freq = self._band
         new_eeg = eeg_data.copy()
-        raw = new_eeg.raw.copy().filter(l_freq=l_freq, h_freq=h_freq, verbose=False)
+        raw = new_eeg.raw.filter(l_freq=l_freq, h_freq=h_freq, verbose=False)
 
         new_eeg._raw = raw
         return new_eeg

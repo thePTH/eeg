@@ -5,3 +5,4 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 eeg_venv/
+computed_data/

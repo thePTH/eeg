@@ -27,13 +27,17 @@ class DetrendStep(PreprocessingStep):
         raw = new_eeg.raw.copy()
 
         detrend_type = "constant" if self._order == 0 else "linear"
-        raw.load_data()
+       
         raw.apply_function(
             lambda signal: scipy.signal.detrend(signal, axis=-1, type=detrend_type)
         )
 
         new_eeg._raw = raw
         return new_eeg
+
+
+import numpy as np
+import scipy.signal
 
 
 class LocalDetrendStep(PreprocessingStep):
@@ -70,9 +74,23 @@ class LocalDetrendStep(PreprocessingStep):
         }
 
     @staticmethod
-    def _local_detrend_1d(x: np.ndarray, fs: float, window_sec: float, step_sec: float) -> np.ndarray:
-        x = np.asarray(x, dtype=float)
+    def _local_detrend_1d(
+        x: np.ndarray,
+        fs: float,
+        window_sec: float,
+        step_sec: float,
+    ) -> np.ndarray:
+        """
+        Version optimisée :
+        - pas de np.polyfit dans une boucle
+        - calcul vectorisé des régressions locales
+        - agrégation des contributions par tableaux de différences
+
+        Complexité bien plus faible que l'approche segment par segment.
+        """
+        x = np.asarray(x, dtype=np.float64)
         n = x.size
+
         if n == 0:
             return x.copy()
 
@@ -80,35 +98,96 @@ class LocalDetrendStep(PreprocessingStep):
         step = max(1, int(round(step_sec * fs)))
 
         if window > n:
-            # Si le signal est trop court, on retombe proprement sur un detrend linéaire global.
+            # Repli propre si le signal est trop court
             return scipy.signal.detrend(x, type="linear")
 
-        corrected_sum = np.zeros(n, dtype=float)
-        weights = np.zeros(n, dtype=float)
-
-        starts = list(range(0, n - window + 1, step))
+        # ------------------------------------------------------------------
+        # 1) Construction des positions de départ des fenêtres
+        # ------------------------------------------------------------------
+        starts = np.arange(0, n - window + 1, step, dtype=np.int64)
         if starts[-1] != n - window:
-            starts.append(n - window)
+            starts = np.append(starts, n - window)
 
-        for start in starts:
-            stop = start + window
-            segment = x[start:stop]
+        # ------------------------------------------------------------------
+        # 2) Pré-calculs pour la régression linéaire locale sur t = 0..window-1
+        #
+        #    slope = (W * sum(t*y) - sum(t) * sum(y)) / (W * sum(t^2) - sum(t)^2)
+        #    intercept_local = mean(y) - slope * mean(t)
+        #
+        #    Pour chaque fenêtre [s, s+W):
+        #    sum(t*y) = sum(g*x[g]) - s * sum(x[g]), où g est l'indice global.
+        # ------------------------------------------------------------------
+        W = float(window)
+        t_sum = W * (W - 1.0) / 2.0
+        t2_sum = (W - 1.0) * W * (2.0 * W - 1.0) / 6.0
+        denom = W * t2_sum - t_sum * t_sum
 
-            t = np.arange(window, dtype=float)
-            # Ajustement affine local
-            coeffs = np.polyfit(t, segment, deg=1)
-            trend = np.polyval(coeffs, t)
-            corrected = segment - trend
+        # Sommes cumulées de x et de g*x[g]
+        idx = np.arange(n, dtype=np.float64)
+        csum_x = np.empty(n + 1, dtype=np.float64)
+        csum_x[0] = 0.0
+        csum_x[1:] = np.cumsum(x)
 
-            corrected_sum[start:stop] += corrected
-            weights[start:stop] += 1.0
+        csum_gx = np.empty(n + 1, dtype=np.float64)
+        csum_gx[0] = 0.0
+        csum_gx[1:] = np.cumsum(idx * x)
 
-        # Sécurité numérique
-        valid = weights > 0
+        stops = starts + window
+
+        sum_y = csum_x[stops] - csum_x[starts]
+        sum_gx = csum_gx[stops] - csum_gx[starts]
+        sum_ty = sum_gx - starts * sum_y
+
+        slopes = (W * sum_ty - t_sum * sum_y) / denom
+        intercepts_local = (sum_y / W) - slopes * (t_sum / W)
+
+        # ------------------------------------------------------------------
+        # 3) Passage de la droite locale a*(i-start) + b
+        #    à une forme globale :
+        #
+        #       a*i + c, avec c = b - a*start
+        #
+        #    Ainsi, pour un échantillon i, la moyenne des tendances prédites
+        #    sur les fenêtres qui le couvrent vaut :
+        #
+        #       (i * sum(a) + sum(c)) / weight
+        # ------------------------------------------------------------------
+        c_global = intercepts_local - slopes * starts
+
+        # ------------------------------------------------------------------
+        # 4) Sommes des contributions sur intervalles via tableaux de différences
+        # ------------------------------------------------------------------
+        diff_w = np.zeros(n + 1, dtype=np.float64)
+        diff_a = np.zeros(n + 1, dtype=np.float64)
+        diff_c = np.zeros(n + 1, dtype=np.float64)
+
+        np.add.at(diff_w, starts, 1.0)
+        np.add.at(diff_w, stops, -1.0)
+
+        np.add.at(diff_a, starts, slopes)
+        np.add.at(diff_a, stops, -slopes)
+
+        np.add.at(diff_c, starts, c_global)
+        np.add.at(diff_c, stops, -c_global)
+
+        weights = np.cumsum(diff_w[:-1])
+        sum_a_cover = np.cumsum(diff_a[:-1])
+        sum_c_cover = np.cumsum(diff_c[:-1])
+
+        # ------------------------------------------------------------------
+        # 5) Reconstruction finale
+        # ------------------------------------------------------------------
         out = x.copy()
-        out[valid] = corrected_sum[valid] / weights[valid]
+        valid = weights > 0
 
-        # En principe, tout est couvert, mais on protège les cas limites.
+        trend_avg = np.zeros(n, dtype=np.float64)
+        trend_avg[valid] = (
+            idx[valid] * sum_a_cover[valid] + sum_c_cover[valid]
+        ) / weights[valid]
+
+        out[valid] = x[valid] - trend_avg[valid]
+
+        # Sécurité sur cas limites
         if np.any(~valid):
             out[~valid] = scipy.signal.detrend(x[~valid], type="linear")
 
@@ -117,7 +196,7 @@ class LocalDetrendStep(PreprocessingStep):
     def transform(self, eeg_data):
         new_eeg = eeg_data.copy()
         raw = new_eeg.raw.copy()
-        raw.load_data()
+        
 
         fs = float(eeg_data.sampling_frequency)
 
