@@ -4,4 +4,4 @@ __pycache__/
 .DS_Store
 .ipynb_checkpoints/
 .env
-/eeg_venv
+eeg_venv/
