@@ -112,21 +112,3 @@ Make sure:
 * subject folders follow `sub-XXX`
 * each subject contains an EEG file
 * filenames match `sub-XXX_task-eyesclosed_eeg.set`
-
----
-
-# Version control recommendation
-
-EEG recordings should **not** be committed to the repository.
-
-Add this to `.gitignore`:
-
-```
-data/sub-*/
-```
-
-Keep only:
-
-```
-data/participants.tsv
-```
