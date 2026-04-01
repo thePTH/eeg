@@ -16,6 +16,11 @@ import mne
 import matplotlib.pyplot as plt
 import numpy as np
 
+from features.visualization import TopomapFactory
+
+
+
+
 
 class SingleParticipantProcessedFeatureDataset:
     def __init__(self, features_df:pd.DataFrame, ppc_raw_data:np.ndarray, subject_dico:dict, pipeline_name:str, eeg_info_dico:dict):
@@ -28,44 +33,37 @@ class SingleParticipantProcessedFeatureDataset:
         self.eeg_info = mne.Info.from_json_dict(eeg_info_dico)
 
     def plot(self, feature_name:str, title:str=None, sub_title:str=None, figsize=(7,6), contours=7, cmap="RdBu_r"):
+
+        
+
         info = self.eeg_info
         values = self.features_df[feature_name].values
-        vmin = np.min(values)
-        vmax = np.max(values)
+        vlim = (min(values), max(values))
 
-        fig, ax = plt.subplots(figsize=figsize)
-        im, _ = mne.viz.plot_topomap(values, info, ch_type="eeg", show=False, sensors=True, axes=ax, contours=contours, cmap=cmap, vlim=(vmin, vmax))
-        fig.colorbar(im, ax=ax)
+        
         figure_title = title if title else feature_name
         subject = self.subject
         subject_description = f"Subject {subject.id} : {subject.health_state} | MMSE : {subject.mmse} | age : {subject.age}Y | gender : {subject.gender}"
 
         figure_subtitle = sub_title if sub_title else subject_description
 
-        # titre principal centré (aligné avec la colorbar)
-        fig.suptitle(
-            figure_title,
-            fontsize=16,
-            y=0.98
-        )
+        
 
-        # description en bas de figure
-        fig.text(
-            0.5, 0.02,
-            figure_subtitle,
-            ha="center",
-            fontsize=10,
-            color="gray"
-        )
+        TopomapFactory.plot(values, info, figure_title, figure_subtitle, figsize, contours, cmap, vlim, sensors=True)
 
-        plt.show()
+    @property
+    def feature_names(self):
+        return list(self.features_df.columns)
+    
+    @property
+    def ch_names(self):
+        return list(self.features_df.index)
 
 
 
 
 
-
-class SingleParticipantProcessedFeatureDatasetactory:
+class SingleParticipantProcessedFeatureDatasetFactory:
     @staticmethod
     def build(extraction_result:FeatureExtractionResult):
         features_df = extraction_result.dataframe
@@ -78,7 +76,9 @@ class SingleParticipantProcessedFeatureDatasetactory:
 
 
 
-
+from participants.groups import HealthState
+from utils.enum import EnumParser
+from utils.dataframe import DataframeHelpers
 class FeaturesDataset:
     def __init__(self, participant_datasets:list[SingleParticipantProcessedFeatureDataset]):
         self.participant_datasets = participant_datasets
@@ -88,12 +88,35 @@ class FeaturesDataset:
         return [dataset.subject for dataset in self.participant_datasets]
     
     @property
-    def ch_names(self) -> list[str]:
-        return self.participant_datasets[0].eeg_info_dico["ch_names"]
+    def ch_names(self) :
+        return self.participant_datasets[0].ch_names
+    
+    @property
+    def feature_names(self):
+        return self.participant_datasets[0].feature_names
     
     @property
     def groups(self):
         return set([subject.group for subject in self.subjects])
+    
+    @property
+    def eeg_info(self):
+        return self.participant_datasets[0].eeg_info
+    
+    @property
+    def pipeline_name(self):
+        return self.participant_datasets[0].pipeline_name
+    
+    def particpant_dataset(self, participant_id:str):
+        for dataset in self.participant_datasets :
+            if dataset.subject.id == participant_id :
+                return dataset
+        raise KeyError("Such key does not exist")
+    
+    def filter_by_healthsate(self, healthstate:HealthState):
+        healthstate = EnumParser.parse(healthstate, HealthState).value
+        return FeaturesDataset([dataset for dataset in self.participant_datasets if dataset.subject.health_state == healthstate])
+
     
     
     def to_long_dataframe(self):
@@ -101,6 +124,7 @@ class FeaturesDataset:
 
         for participant_dataset in self.participant_datasets :
             subject_id = participant_dataset.subject.id
+            subject_mmse = participant_dataset.subject.mmse
             subject_health = participant_dataset.subject.health_state
             features_df = participant_dataset.features_df
 
@@ -116,6 +140,7 @@ class FeaturesDataset:
 
         df_long["subject_id"] = subject_id
         df_long["subject_health"] = subject_health
+        df_long["subject_mmse"] = subject_mmse
         
 
         rows.append(df_long)
@@ -131,10 +156,12 @@ class FeaturesDataset:
             subject_id = participant_dataset.subject.id
             subject_health = participant_dataset.subject.health_state
             features_df = participant_dataset.features_df
+            subject_mmse = participant_dataset.subject.mmse
 
             row = {
                 "subject_id": subject_id,
                 "subject_health": subject_health,
+                "subject_mmse": subject_mmse
             }
 
             for channel in features_df.index:
@@ -147,3 +174,8 @@ class FeaturesDataset:
         big_df = pd.DataFrame(rows)
 
         return big_df
+    
+    @property
+    def mean_feature_df(self):
+        return DataframeHelpers.mean([dataset.features_df for dataset in self.participant_datasets])
+
