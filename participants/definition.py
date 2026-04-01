@@ -3,6 +3,9 @@ from participants.genders import Gender
 from typing import Union
 from utils.enum import EnumParser
 
+
+
+
 class Participant :
     def __init__(self, id:str, gender:Union[Gender, str], age:int, group:Union[Group,str], mmse:int):
 
@@ -33,6 +36,14 @@ class Participant :
     @property
     def mmse(self):
         return self._mmse
+    
+    def to_dict(self):
+        return {"id": self.id, "gender":self.gender, "age":self.age, "group":self.group, "mmse":self.mmse}
 
     
+
+class ParticipantFactory:
+    @staticmethod
+    def build(dico:dict):
+        return Participant(id=dico["id"], gender=dico["gender"], age=dico["age"], group=dico["group"], mmse=dico["mmse"])
     

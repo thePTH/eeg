@@ -53,6 +53,10 @@ class PSDAnalysisResult:
             plt.show()
 
 
+    def to_dict(self) -> dict[float, float]:
+        return {freq : power for freq, power in zip(self.freqs, self.psd)}
+
+
 @dataclass(slots=True, frozen=True)
 class SignalSpectralAnalysisResult:
     freqs: np.ndarray
