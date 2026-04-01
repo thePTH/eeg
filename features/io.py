@@ -1,27 +1,17 @@
 from __future__ import annotations
 
 import json
-import pickle
-import re
-from pathlib import Path
-from typing import Any
-
-import numpy as np
-import pandas as pd
-
-from features.dataset import FeatureDataset
-
-
-import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
+from features.dataset import SingleParticipantProcessedFeatureDataset, FeaturesDataset
 
-class FeatureDatasetIO:
+
+class SingleParticipantProcessedFeatureDatasetIO:
 
     @staticmethod
-    def export(dataset:FeatureDataset, path: str | Path):
+    def export(dataset: SingleParticipantProcessedFeatureDataset, path: str | Path):
         """
         Exporte un FeatureDataset dans un dossier structuré.
 
@@ -31,13 +21,12 @@ class FeatureDatasetIO:
         ├── ppc.npy
         └── metadata.json
         """
-        path += f"/subject-{dataset.subject_dico["id"]}/"
-        path = Path(path)
+
+        path = Path(path) / f"sub-{dataset.subject_dico['id']}"
         path.mkdir(parents=True, exist_ok=True)
 
         # Save dataframe
         dataset.features_df.to_parquet(path / "features.parquet")
-
 
         # Save PPC tensor
         np.save(path / "ppc.npy", dataset.ppc_raw_data)
@@ -46,14 +35,14 @@ class FeatureDatasetIO:
         metadata = {
             "subject_dico": dataset.subject_dico,
             "pipeline_name": dataset.pipeline_name,
+            "eeg_info_dico": dataset.eeg_info_dico,
         }
 
         with open(path / "metadata.json", "w") as f:
             json.dump(metadata, f)
 
-
     @staticmethod
-    def load(path: str | Path):
+    def load(path: str | Path) -> SingleParticipantProcessedFeatureDataset:
         """
         Recharge un FeatureDataset depuis un dossier exporté.
         """
@@ -70,12 +59,24 @@ class FeatureDatasetIO:
         with open(path / "metadata.json", "r") as f:
             metadata = json.load(f)
 
-        
-
-        return FeatureDataset(
+        return SingleParticipantProcessedFeatureDataset(
             features_df=features_df,
             ppc_raw_data=ppc_raw_data,
             subject_dico=metadata["subject_dico"],
             pipeline_name=metadata["pipeline_name"],
+            eeg_info_dico=metadata["eeg_info_dico"],
         )
+    
 
+
+from pathlib import Path
+class FeaturesDatasetIO:
+    @staticmethod
+    def load(folder_name_path):
+        participant_datasets = []
+        for dataset_folder_path in Path(folder_name_path).iterdir() :
+            if dataset_folder_path.is_dir():
+                partipant_dataset = SingleParticipantProcessedFeatureDatasetIO.load(dataset_folder_path)
+                participant_datasets.append(partipant_dataset)
+
+        return FeaturesDataset(participant_datasets)

@@ -134,8 +134,9 @@ class EEGRecordedDataProvider:
     def build(data_file_path:str) -> list[EEGRecordedData]:
         recordings = []
         root = Path(data_file_path)
+        
 
-        with open("data/participants.tsv", newline="") as f:
+        with open(root/"participants.tsv", newline="") as f:
             reader = csv.DictReader(f, delimiter="\t")
             for row in reader:
                 subject = EEGRecordedDataProvider._extract_subject(row)
