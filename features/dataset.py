@@ -79,6 +79,76 @@ class SingleParticipantProcessedFeatureDatasetFactory:
 from participants.groups import HealthState
 from utils.enum import EnumParser
 from utils.dataframe import DataframeHelpers
+
+
+class SampleSelector:
+
+    def __init__(self, dataset: "FeaturesDataset"):
+        self.dataset = dataset
+        self._long_df_cache = None
+
+    @property
+    def long_df(self):
+        if self._long_df_cache is None:
+            self._long_df_cache = self.dataset.to_long_dataframe()
+        return self._long_df_cache
+
+    def select_feature(self, feature: str) -> pd.DataFrame:
+
+        return self.long_df[self.long_df["feature"] == feature]
+
+    def select_channel(self, feature: str, channel: str):
+
+        df = self.select_feature(feature)
+        return df[df["channel"] == channel]
+
+    def select_groups(
+        self,
+        feature: str,
+        group_col: str,
+        group_a: str,
+        group_b: str,
+        channel: str | None = None,
+        value_col: str = "value",
+    ):
+
+        df = self.select_feature(feature)
+
+        if channel:
+            df = df[df["channel"] == channel]
+
+        group_a_df = df[df[group_col] == group_a][value_col]
+        group_b_df = df[df[group_col] == group_b][value_col]
+
+        return group_a_df, group_b_df
+    
+    def select_groups_all_channels(
+        self,
+        feature,
+        group_col,
+        group_a,
+        group_b,
+        value_col="value"
+    ):
+
+        df = self.select_feature(feature)
+
+        grouped = {}
+
+        for channel in self.dataset.ch_names:
+
+            channel_df = df[df["channel"] == channel]
+
+            group_a_vals = channel_df[channel_df[group_col] == group_a][value_col]
+            group_b_vals = channel_df[channel_df[group_col] == group_b][value_col]
+
+            if not group_a_vals.empty and not group_b_vals.empty:
+
+                grouped[channel] = (group_a_vals, group_b_vals)
+
+        return grouped
+
+
 class FeaturesDataset:
     def __init__(self, participant_datasets:list[SingleParticipantProcessedFeatureDataset]):
         self.participant_datasets = participant_datasets
@@ -125,6 +195,7 @@ class FeaturesDataset:
         for participant_dataset in self.participant_datasets :
             subject_id = participant_dataset.subject.id
             subject_mmse = participant_dataset.subject.mmse
+            subject_age = participant_dataset.subject.age
             subject_health = participant_dataset.subject.health_state
             features_df = participant_dataset.features_df
 
@@ -138,12 +209,13 @@ class FeaturesDataset:
                 )
         )
 
-        df_long["subject_id"] = subject_id
-        df_long["subject_health"] = subject_health
-        df_long["subject_mmse"] = subject_mmse
+            df_long["subject_id"] = subject_id
+            df_long["subject_age"] = subject_age
+            df_long["subject_health"] = subject_health
+            df_long["subject_mmse"] = subject_mmse
         
 
-        rows.append(df_long)
+            rows.append(df_long)
 
         big_df = pd.concat(rows, ignore_index=True)
 
@@ -175,7 +247,29 @@ class FeaturesDataset:
 
         return big_df
     
+    def to_subject_dataframe(self):
+        rows = []
+
+        for participant_dataset in self.participant_datasets:
+            subject = participant_dataset.subject
+
+            rows.append({
+                "subject_id": subject.id,
+                "subject_health": subject.health_state,
+                "subject_age": subject.age,
+                "subject_mmse": subject.mmse,
+            })
+
+        return pd.DataFrame(rows)
+    
     @property
     def mean_feature_df(self):
         return DataframeHelpers.mean([dataset.features_df for dataset in self.participant_datasets])
+    
+
+    @property
+    def selector(self):
+        return SampleSelector(self)
+
+
 
