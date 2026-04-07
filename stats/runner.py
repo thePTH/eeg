@@ -5,23 +5,27 @@ from stats.results import StatisticalTestResultSet
 from stats.bundles import SampleBundleFactory
 from stats.engines.factory import StatisticalTestEngineFactory
 from features.dataset import FeaturesDataset
+from collections.abc import Mapping
+from typing import Union, Any
+
 
 class StatisticalTestRunner:
     """
     Point d'entrée unique du framework statistique.
 
-    Responsabilités :
-    - recevoir une query + un dataset
-    - déterminer les keys à analyser
-    - construire les SampleBundle
-    - choisir le bon TestEngine
-    - exécuter le test sur chaque key
-    - renvoyer un ResultSet homogène
+    Supporte :
+    - une query simple -> renvoie un StatisticalTestResultSet
+    - un dict[str, query] -> renvoie un dict[str, StatisticalTestResultSet]
     """
 
-
     @staticmethod
-    def run(query: StatisticalQuery, dataset: FeaturesDataset) -> StatisticalTestResultSet:
+    def run(query:Union[StatisticalQuery, dict[Any, StatisticalQuery]], dataset: FeaturesDataset) -> Union[StatisticalTestResultSet, dict[Any, StatisticalTestResultSet]]:
+        if isinstance(query, Mapping):
+            return {
+                key: StatisticalTestRunner.run(subquery, dataset)
+                for key, subquery in query.items()
+            }
+
         engine = StatisticalTestEngineFactory.build(query)
         keys = SampleBundleFactory.list_keys(query, dataset)
 
