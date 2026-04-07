@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any, Union
+
 from statsmodels.stats.multitest import multipletests
 
-from stats.results import  StatisticalTestResultSet, CorrectedStatisticalTestResult, CorrectedStatisticalTestResultSet
+from stats.results import (
+    CorrectedStatisticalTestResult,
+    CorrectedStatisticalTestResultSet,
+    StatisticalTestResultSet,
+)
 
-from collections.abc import Mapping
-from typing import Union, Any
 
 class FDRCorrector:
     @staticmethod
-    def correct(result_set:Union[StatisticalTestResultSet, dict[Any, StatisticalTestResultSet]], alpha: float = 0.05) -> Union[CorrectedStatisticalTestResultSet, dict[Any, CorrectedStatisticalTestResultSet]]:
+    def correct(
+        result_set: Union[StatisticalTestResultSet, dict[Any, StatisticalTestResultSet]],
+        alpha: float = 0.05,
+    ) -> Union[CorrectedStatisticalTestResultSet, dict[Any, CorrectedStatisticalTestResultSet]]:
         if isinstance(result_set, Mapping):
             return {
                 key: FDRCorrector.correct(sub_result_set, alpha=alpha)

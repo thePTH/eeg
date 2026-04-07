@@ -18,12 +18,6 @@ class StatisticalTestResult:
 
     @property
     def label(self) -> str:
-        """
-        Description standardisée de ce qui est testé.
-        Exemple :
-        - 'reaction_time (patients) vs reaction_time (controls)'
-        - 'theta_power (Fz) vs age'
-        """
         return f"{self.x_name} vs {self.y_name}"
 
 
@@ -44,21 +38,26 @@ class StatisticalTestResultSet:
     def p_values(self) -> dict[str, float]:
         return {key: result.p_value for key, result in self.results.items()}
 
+    def keys(self) -> list[str]:
+        return list(self.results.keys())
+
     def to_dataframe(self) -> pd.DataFrame:
         rows = []
         for key, result in self.results.items():
-            rows.append({
-                "key": key,
-                "target": result.target,
-                "statistic": result.statistic,
-                "p_value": result.p_value,
-                "test_name": result.test_name,
-                "n_x": result.n_x,
-                "n_y": result.n_y,
-                "x_name": result.x_name,
-                "y_name": result.y_name,
-                "label": result.label,
-            })
+            rows.append(
+                {
+                    "key": key,
+                    "target": result.target,
+                    "statistic": result.statistic,
+                    "p_value": result.p_value,
+                    "test_name": result.test_name,
+                    "n_x": result.n_x,
+                    "n_y": result.n_y,
+                    "x_name": result.x_name,
+                    "y_name": result.y_name,
+                    "label": result.label,
+                }
+            )
         return pd.DataFrame(rows)
 
 
@@ -70,23 +69,28 @@ class CorrectedStatisticalTestResultSet:
     correction_method: str
     alpha: float
 
+    def keys(self) -> list[str]:
+        return list(self.results.keys())
+
     def to_dataframe(self) -> pd.DataFrame:
         rows = []
         for key, result in self.results.items():
-            rows.append({
-                "key": key,
-                "target": result.target,
-                "statistic": result.statistic,
-                "p_value": result.p_value,
-                "p_value_corrected": result.p_value_corrected,
-                "correction_method": result.correction_method,
-                "alpha": result.alpha,
-                "reject_null": result.reject_null,
-                "test_name": result.test_name,
-                "n_x": result.n_x,
-                "n_y": result.n_y,
-                "x_name": result.x_name,
-                "y_name": result.y_name,
-                "label": result.label,
-            })
+            rows.append(
+                {
+                    "key": key,
+                    "target": result.target,
+                    "statistic": result.statistic,
+                    "p_value": result.p_value,
+                    "p_value_corrected": result.p_value_corrected,
+                    "correction_method": result.correction_method,
+                    "alpha": result.alpha,
+                    "reject_null": result.reject_null,
+                    "test_name": result.test_name,
+                    "n_x": result.n_x,
+                    "n_y": result.n_y,
+                    "x_name": result.x_name,
+                    "y_name": result.y_name,
+                    "label": result.label,
+                }
+            )
         return pd.DataFrame(rows)

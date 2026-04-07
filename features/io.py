@@ -1,37 +1,39 @@
 from __future__ import annotations
 
 import json
-import numpy as np
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 from features.dataset import SingleParticipantProcessedFeatureDataset, FeaturesDataset
 
 
 class SingleParticipantProcessedFeatureDatasetIO:
-
     @staticmethod
     def export(dataset: SingleParticipantProcessedFeatureDataset, path: str | Path):
         """
-        Exporte un FeatureDataset dans un dossier structuré.
+        Exporte un SingleParticipantProcessedFeatureDataset dans un dossier structuré.
 
         Structure créée :
         path/
-        ├── features.parquet
-        ├── ppc.npy
-        └── metadata.json
+        └── sub-<id>/
+            ├── features.parquet
+            ├── psd_band_results.json
+            ├── ppc_band_results.json
+            └── metadata.json
         """
 
         path = Path(path) / f"sub-{dataset.subject_dico['id']}"
         path.mkdir(parents=True, exist_ok=True)
 
-        # Save dataframe
         dataset.features_df.to_parquet(path / "features.parquet")
 
-        # Save PPC tensor
-        np.save(path / "ppc.npy", dataset.ppc_raw_data)
+        with open(path / "psd_band_results.json", "w") as f:
+            json.dump(dataset.psd_band_results, f)
 
-        # Save metadata
+        with open(path / "ppc_band_results.json", "w") as f:
+            json.dump(dataset.ppc_band_results, f)
+
         metadata = {
             "subject_dico": dataset.subject_dico,
             "pipeline_name": dataset.pipeline_name,
@@ -44,39 +46,51 @@ class SingleParticipantProcessedFeatureDatasetIO:
     @staticmethod
     def load(path: str | Path) -> SingleParticipantProcessedFeatureDataset:
         """
-        Recharge un FeatureDataset depuis un dossier exporté.
+        Recharge un SingleParticipantProcessedFeatureDataset depuis un dossier exporté.
         """
 
         path = Path(path)
 
-        # Load dataframe
         features_df = pd.read_parquet(path / "features.parquet")
 
-        # Load PPC tensor
-        ppc_raw_data = np.load(path / "ppc.npy")
+        with open(path / "psd_band_results.json", "r") as f:
+            psd_band_results = json.load(f)
 
-        # Load metadata
+        with open(path / "ppc_band_results.json", "r") as f:
+            ppc_band_results = json.load(f)
+
         with open(path / "metadata.json", "r") as f:
             metadata = json.load(f)
 
         return SingleParticipantProcessedFeatureDataset(
             features_df=features_df,
-            ppc_raw_data=ppc_raw_data,
+            psd_band_results=psd_band_results,
+            ppc_band_results=ppc_band_results,
             subject_dico=metadata["subject_dico"],
             pipeline_name=metadata["pipeline_name"],
             eeg_info_dico=metadata["eeg_info_dico"],
         )
-    
 
 
-from pathlib import Path
 class FeaturesDatasetIO:
     @staticmethod
-    def load(folder_name_path):
+    def export(dataset: FeaturesDataset, folder_name_path: str | Path):
+        folder = Path(folder_name_path)
+        folder.mkdir(parents=True, exist_ok=True)
+
+        for participant_dataset in dataset.participant_datasets:
+            SingleParticipantProcessedFeatureDatasetIO.export(participant_dataset, folder)
+
+    @staticmethod
+    def load(folder_name_path: str | Path):
         participant_datasets = []
-        for dataset_folder_path in Path(folder_name_path).iterdir() :
+        folder = Path(folder_name_path)
+
+        for dataset_folder_path in sorted(folder.iterdir()):
             if dataset_folder_path.is_dir():
-                partipant_dataset = SingleParticipantProcessedFeatureDatasetIO.load(dataset_folder_path)
-                participant_datasets.append(partipant_dataset)
+                participant_dataset = SingleParticipantProcessedFeatureDatasetIO.load(
+                    dataset_folder_path
+                )
+                participant_datasets.append(participant_dataset)
 
         return FeaturesDataset(participant_datasets)

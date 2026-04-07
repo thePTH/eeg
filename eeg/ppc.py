@@ -344,7 +344,13 @@ class PPCAnalysisEngineParametersFactory:
         mode = config.ppc_mode
         n_jobs = config.ppc_n_jobs
 
+        bands = tuple(
+            SpectralBand(name=band_name, fmin=fmin, fmax=fmax)
+            for band_name, (fmin, fmax) in config.bands.items()
+        )
+
         return SignalPPCAnalysisParameters(
+            bands=bands,
             epoch_duration=epoch_duration,
             epoch_overlap=epoch_overlap,
             mode=mode,

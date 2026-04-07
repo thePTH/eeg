@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from stats.queries import StatisticalQuery
-from stats.results import StatisticalTestResultSet
+from collections.abc import Mapping
+from typing import Any, Union
+
+from features.dataset import FeaturesDataset
 from stats.bundles import SampleBundleFactory
 from stats.engines.factory import StatisticalTestEngineFactory
-from features.dataset import FeaturesDataset
-from collections.abc import Mapping
-from typing import Union, Any
+from stats.queries import StatisticalQuery
+from stats.results import StatisticalTestResultSet
 
 
 class StatisticalTestRunner:
@@ -15,11 +16,14 @@ class StatisticalTestRunner:
 
     Supporte :
     - une query simple -> renvoie un StatisticalTestResultSet
-    - un dict[str, query] -> renvoie un dict[str, StatisticalTestResultSet]
+    - un dict[key, query] -> renvoie un dict[key, StatisticalTestResultSet]
     """
 
     @staticmethod
-    def run(query:Union[StatisticalQuery, dict[Any, StatisticalQuery]], dataset: FeaturesDataset) -> Union[StatisticalTestResultSet, dict[Any, StatisticalTestResultSet]]:
+    def run(
+        query: Union[StatisticalQuery, dict[Any, StatisticalQuery]],
+        dataset: FeaturesDataset,
+    ) -> Union[StatisticalTestResultSet, dict[Any, StatisticalTestResultSet]]:
         if isinstance(query, Mapping):
             return {
                 key: StatisticalTestRunner.run(subquery, dataset)

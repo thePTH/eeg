@@ -10,6 +10,7 @@ class StatisticalTestEngine(ABC):
     """
     Un engine sait appliquer une formule statistique à un SampleBundle.
     """
+
     test_name: str
 
     @abstractmethod
@@ -25,12 +26,6 @@ class StatisticalTestEngine(ABC):
         target: str,
         key: str,
     ) -> StatisticalTestResult:
-        """
-        Construit un résultat standardisé en propageant automatiquement
-        les métadonnées du bundle (tailles d'échantillon et libellés).
-
-        Cette méthode centralise la logique commune à tous les engines.
-        """
         return StatisticalTestResult(
             statistic=float(statistic),
             p_value=float(p_value),

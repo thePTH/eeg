@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from stats.queries import StatisticalQuery
 from stats.engines.base import StatisticalTestEngine
+from stats.engines.spearman import SpearmanEngine
 from stats.engines.ttest import TTestEngine
 from stats.engines.wilcoxon import WilcoxonRankSumEngine
-from stats.engines.spearman import SpearmanEngine
+from stats.queries import StatisticalQuery
 
 
 class StatisticalTestEngineFactory:

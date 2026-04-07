@@ -1,275 +1,370 @@
 from __future__ import annotations
 
-import json
-import pickle
-import re
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
+import mne
 import numpy as np
 import pandas as pd
 
-from features.factory import FeatureExtractionResult
 from participants.definition import ParticipantFactory
-
-import mne
-import matplotlib.pyplot as plt
-import numpy as np
-
-from features.visualization import TopomapFactory
+from participants.groups import HealthState
+from utils.dataframe import DataframeHelpers
+from utils.enum import EnumParser
 
 
+def _canonical_edge_key(seed: str, target: str) -> str:
+    """
+    Construit une clé canonique d'arête non orientée.
+
+    Exemple
+    -------
+    >>> _canonical_edge_key("Fp2", "Fp1")
+    'Fp1__Fp2'
+    """
+    a, b = sorted((str(seed), str(target)))
+    return f"{a}__{b}"
 
 
-
+@dataclass
 class SingleParticipantProcessedFeatureDataset:
-    def __init__(self, features_df:pd.DataFrame, ppc_raw_data:np.ndarray, subject_dico:dict, pipeline_name:str, eeg_info_dico:dict):
-        self.features_df = features_df
-        self.ppc_raw_data = ppc_raw_data #(n_channels, n_channels, n_bands)
-        self.subject_dico = subject_dico
-        self.subject = ParticipantFactory.build(subject_dico)
-        self.pipeline_name = pipeline_name
-        self.eeg_info_dico = eeg_info_dico
-        self.eeg_info = mne.Info.from_json_dict(eeg_info_dico)
+    """
+    Dataset sujet-level après extraction complète.
 
-    def plot(self, feature_name:str, title:str=None, sub_title:str=None, figsize=(7,6), contours=7, cmap="RdBu_r"):
+    Paramètres
+    ----------
+    features_df:
+        DataFrame principal des features scalaires, indexé par canal.
+        shape attendue = (n_channels, n_features)
 
-        
+    psd_band_results:
+        Résultats PSD agrégés par bande et par canal.
+        Format attendu :
+        {
+            "Fp1": {"delta": ..., "theta": ..., ...},
+            "Fp2": {...},
+            ...
+        }
 
-        info = self.eeg_info
-        values = self.features_df[feature_name].values
-        vlim = (min(values), max(values))
+    ppc_band_results:
+        Résultats PPC agrégés par bande.
+        Format attendu :
+        {
+            "delta": [[...], [...], ...],
+            "theta": [[...], [...], ...],
+            ...
+        }
+        ou bien directement des np.ndarray.
+    """
 
-        
-        figure_title = title if title else feature_name
-        subject = self.subject
-        subject_description = f"Subject {subject.id} : {subject.health_state} | MMSE : {subject.mmse} | age : {subject.age}Y | gender : {subject.gender}"
+    features_df: pd.DataFrame
+    psd_band_results: dict[str, dict[str, float]]
+    ppc_band_results: dict[str, Any]
+    subject_dico: dict[str, Any]
+    pipeline_name: str
+    eeg_info_dico: dict[str, Any]
 
-        figure_subtitle = sub_title if sub_title else subject_description
-
-        
-
-        TopomapFactory.plot(values, info, figure_title, figure_subtitle, figsize, contours, cmap, vlim, sensors=True)
+    def __post_init__(self):
+        self.subject = ParticipantFactory.build(self.subject_dico)
+        self.eeg_info = mne.Info.from_json_dict(self.eeg_info_dico)
 
     @property
-    def feature_names(self):
+    def feature_names(self) -> list[str]:
         return list(self.features_df.columns)
-    
+
     @property
-    def ch_names(self):
+    def ch_names(self) -> list[str]:
         return list(self.features_df.index)
 
+    @property
+    def psd_band_names(self) -> list[str]:
+        if not self.psd_band_results:
+            return []
+        first_signal = next(iter(self.psd_band_results.values()))
+        return list(first_signal.keys())
 
+    @property
+    def ppc_band_names(self) -> list[str]:
+        return list(self.ppc_band_results.keys())
 
+    def ppc_matrix(self, band_name: str) -> np.ndarray:
+        if band_name not in self.ppc_band_results:
+            raise KeyError(
+                f"Unknown PPC band '{band_name}'. Available bands: {self.ppc_band_names}"
+            )
+        return np.asarray(self.ppc_band_results[band_name], dtype=float)
 
+    @property
+    def ppc_edge_keys(self) -> list[str]:
+        ch_names = self.ch_names
+        keys: list[str] = []
+        for i in range(len(ch_names)):
+            for j in range(i + 1, len(ch_names)):
+                keys.append(_canonical_edge_key(ch_names[i], ch_names[j]))
+        return keys
 
-class SingleParticipantProcessedFeatureDatasetFactory:
-    @staticmethod
-    def build(extraction_result:FeatureExtractionResult):
-        features_df = extraction_result.dataframe
-        ppc_raw_data = extraction_result.ppc_result.dense_data_raw
-        subject_dico = extraction_result.eeg.source.subject.to_dict()
-        pipeline_name = extraction_result.eeg.pipeline_name
-        eeg_info_dico = extraction_result.eeg.info.to_json_dict()
-        return SingleParticipantProcessedFeatureDataset(features_df, ppc_raw_data, subject_dico, pipeline_name, eeg_info_dico)
-    
+    def to_psd_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame.from_dict(self.psd_band_results, orient="index")
 
+    def to_ppc_edge_dataframe(self) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        ch_names = self.ch_names
 
+        for band_name in self.ppc_band_names:
+            mat = self.ppc_matrix(band_name)
+            ii, jj = np.triu_indices_from(mat, k=1)
+            for i, j in zip(ii.tolist(), jj.tolist()):
+                seed = ch_names[i]
+                target = ch_names[j]
+                rows.append(
+                    {
+                        "band": band_name,
+                        "seed": seed,
+                        "target": target,
+                        "edge": _canonical_edge_key(seed, target),
+                        "value": float(mat[i, j]),
+                    }
+                )
 
-from participants.groups import HealthState
-from utils.enum import EnumParser
-from utils.dataframe import DataframeHelpers
+        return pd.DataFrame(rows)
 
 
 class SampleSelector:
+    """
+    Helper pratique pour filtrer rapidement le dataset global.
+    """
 
     def __init__(self, dataset: "FeaturesDataset"):
         self.dataset = dataset
-        self._long_df_cache = None
+        self._long_features_df_cache: pd.DataFrame | None = None
+        self._long_psd_df_cache: pd.DataFrame | None = None
+        self._long_ppc_df_cache: pd.DataFrame | None = None
 
     @property
-    def long_df(self):
-        if self._long_df_cache is None:
-            self._long_df_cache = self.dataset.to_long_dataframe()
-        return self._long_df_cache
+    def long_features_df(self) -> pd.DataFrame:
+        if self._long_features_df_cache is None:
+            self._long_features_df_cache = self.dataset.to_long_dataframe()
+        return self._long_features_df_cache
 
-    def select_feature(self, feature: str) -> pd.DataFrame:
+    @property
+    def long_psd_df(self) -> pd.DataFrame:
+        if self._long_psd_df_cache is None:
+            self._long_psd_df_cache = self.dataset.to_long_psd_dataframe()
+        return self._long_psd_df_cache
 
-        return self.long_df[self.long_df["feature"] == feature]
-
-    def select_channel(self, feature: str, channel: str):
-
-        df = self.select_feature(feature)
-        return df[df["channel"] == channel]
-
-    def select_groups(
-        self,
-        feature: str,
-        group_col: str,
-        group_a: str,
-        group_b: str,
-        channel: str | None = None,
-        value_col: str = "value",
-    ):
-
-        df = self.select_feature(feature)
-
-        if channel:
-            df = df[df["channel"] == channel]
-
-        group_a_df = df[df[group_col] == group_a][value_col]
-        group_b_df = df[df[group_col] == group_b][value_col]
-
-        return group_a_df, group_b_df
-    
-    def select_groups_all_channels(
-        self,
-        feature,
-        group_col,
-        group_a,
-        group_b,
-        value_col="value"
-    ):
-
-        df = self.select_feature(feature)
-
-        grouped = {}
-
-        for channel in self.dataset.ch_names:
-
-            channel_df = df[df["channel"] == channel]
-
-            group_a_vals = channel_df[channel_df[group_col] == group_a][value_col]
-            group_b_vals = channel_df[channel_df[group_col] == group_b][value_col]
-
-            if not group_a_vals.empty and not group_b_vals.empty:
-
-                grouped[channel] = (group_a_vals, group_b_vals)
-
-        return grouped
+    @property
+    def long_ppc_df(self) -> pd.DataFrame:
+        if self._long_ppc_df_cache is None:
+            self._long_ppc_df_cache = self.dataset.to_long_ppc_dataframe()
+        return self._long_ppc_df_cache
 
 
 class FeaturesDataset:
-    def __init__(self, participant_datasets:list[SingleParticipantProcessedFeatureDataset]):
+    """
+    Conteneur global regroupant tous les sujets d'une cohorte.
+
+    Ce dataset expose trois vues longues distinctes :
+    - features scalaires par canal
+    - PSD par bande et par canal
+    - PPC par bande et par arête
+
+    C'est ce qu'il faut pour brancher les queries / bundles / engines
+    de manière homogène.
+    """
+
+    def __init__(self, participant_datasets: list[SingleParticipantProcessedFeatureDataset]):
+        if not participant_datasets:
+            raise ValueError("participant_datasets cannot be empty.")
         self.participant_datasets = participant_datasets
 
     @property
     def subjects(self):
         return [dataset.subject for dataset in self.participant_datasets]
-    
+
     @property
-    def ch_names(self) :
+    def ch_names(self) -> list[str]:
         return self.participant_datasets[0].ch_names
-    
+
     @property
-    def feature_names(self):
+    def feature_names(self) -> list[str]:
         return self.participant_datasets[0].feature_names
-    
+
+    @property
+    def psd_band_names(self) -> list[str]:
+        return self.participant_datasets[0].psd_band_names
+
+    @property
+    def ppc_band_names(self) -> list[str]:
+        return self.participant_datasets[0].ppc_band_names
+
+    @property
+    def ppc_edge_keys(self) -> list[str]:
+        return self.participant_datasets[0].ppc_edge_keys
+
     @property
     def groups(self):
-        return set([subject.group for subject in self.subjects])
-    
+        return set(subject.group for subject in self.subjects)
+
     @property
     def eeg_info(self):
         return self.participant_datasets[0].eeg_info
-    
+
     @property
-    def pipeline_name(self):
+    def pipeline_name(self) -> str:
         return self.participant_datasets[0].pipeline_name
-    
-    def particpant_dataset(self, participant_id:str):
-        for dataset in self.participant_datasets :
-            if dataset.subject.id == participant_id :
+
+    def participant_dataset(self, participant_id: str) -> SingleParticipantProcessedFeatureDataset:
+        for dataset in self.participant_datasets:
+            if dataset.subject.id == participant_id:
                 return dataset
-        raise KeyError("Such key does not exist")
-    
-    def filter_by_healthsate(self, healthstate:HealthState):
+        raise KeyError(f"No participant dataset found for id='{participant_id}'.")
+
+    def filter_by_healthstate(self, healthstate: HealthState):
         healthstate = EnumParser.parse(healthstate, HealthState).value
-        return FeaturesDataset([dataset for dataset in self.participant_datasets if dataset.subject.health_state == healthstate])
+        return FeaturesDataset(
+            [
+                dataset
+                for dataset in self.participant_datasets
+                if dataset.subject.health_state == healthstate
+            ]
+        )
 
-    
-    
-    def to_long_dataframe(self):
-        rows = []
+    # Alias pour compatibilité avec l'ancien typo
+    def filter_by_healthsate(self, healthstate: HealthState):
+        return self.filter_by_healthstate(healthstate)
 
-        for participant_dataset in self.participant_datasets :
-            subject_id = participant_dataset.subject.id
-            subject_mmse = participant_dataset.subject.mmse
-            subject_age = participant_dataset.subject.age
-            subject_health = participant_dataset.subject.health_state
+    def to_long_dataframe(self) -> pd.DataFrame:
+        """
+        Vue longue des features scalaires.
+
+        Colonnes retournées
+        ------------------
+        subject_id, subject_age, subject_mmse, subject_health,
+        channel, feature, value
+        """
+        rows: list[pd.DataFrame] = []
+
+        for participant_dataset in self.participant_datasets:
+            subject = participant_dataset.subject
             features_df = participant_dataset.features_df
 
             df_long = (
                 features_df
                 .reset_index(names="channel")
-                .melt(
-                    id_vars="channel",
-                    var_name="feature",
-                    value_name="value"
-                )
-        )
+                .melt(id_vars="channel", var_name="feature", value_name="value")
+            )
 
-            df_long["subject_id"] = subject_id
-            df_long["subject_age"] = subject_age
-            df_long["subject_health"] = subject_health
-            df_long["subject_mmse"] = subject_mmse
-        
+            df_long["subject_id"] = subject.id
+            df_long["subject_age"] = subject.age
+            df_long["subject_health"] = subject.health_state
+            df_long["subject_mmse"] = subject.mmse
 
             rows.append(df_long)
 
-        big_df = pd.concat(rows, ignore_index=True)
+        return pd.concat(rows, ignore_index=True)
 
-        return big_df
-    
-    def to_wide_dataframe(self):
-        rows = []
+    def to_long_psd_dataframe(self) -> pd.DataFrame:
+        """
+        Vue longue des résultats PSD agrégés par bande.
+
+        Colonnes retournées
+        ------------------
+        subject_id, subject_age, subject_mmse, subject_health,
+        channel, band, value
+        """
+        rows: list[pd.DataFrame] = []
 
         for participant_dataset in self.participant_datasets:
-            subject_id = participant_dataset.subject.id
-            subject_health = participant_dataset.subject.health_state
-            features_df = participant_dataset.features_df
-            subject_mmse = participant_dataset.subject.mmse
+            subject = participant_dataset.subject
+            psd_df = participant_dataset.to_psd_dataframe()
 
-            row = {
-                "subject_id": subject_id,
-                "subject_health": subject_health,
-                "subject_mmse": subject_mmse
-            }
+            df_long = (
+                psd_df
+                .reset_index(names="channel")
+                .melt(id_vars="channel", var_name="band", value_name="value")
+            )
 
-            for channel in features_df.index:
-                for feature in features_df.columns:
-                    col_name = f"{channel}_{feature}"
-                    row[col_name] = features_df.loc[channel, feature]
+            df_long["subject_id"] = subject.id
+            df_long["subject_age"] = subject.age
+            df_long["subject_health"] = subject.health_state
+            df_long["subject_mmse"] = subject.mmse
 
-            rows.append(row)
+            rows.append(df_long)
 
-        big_df = pd.DataFrame(rows)
+        return pd.concat(rows, ignore_index=True)
 
-        return big_df
-    
-    def to_subject_dataframe(self):
+    def to_long_ppc_dataframe(self) -> pd.DataFrame:
+        """
+        Vue longue des résultats PPC par bande et par arête.
+
+        Colonnes retournées
+        ------------------
+        subject_id, subject_age, subject_mmse, subject_health,
+        band, seed, target, edge, value
+        """
+        rows: list[pd.DataFrame] = []
+
+        for participant_dataset in self.participant_datasets:
+            subject = participant_dataset.subject
+            df_long = participant_dataset.to_ppc_edge_dataframe().copy()
+
+            df_long["subject_id"] = subject.id
+            df_long["subject_age"] = subject.age
+            df_long["subject_health"] = subject.health_state
+            df_long["subject_mmse"] = subject.mmse
+
+            rows.append(df_long)
+
+        return pd.concat(rows, ignore_index=True)
+
+    def to_wide_dataframe(self) -> pd.DataFrame:
         rows = []
 
         for participant_dataset in self.participant_datasets:
             subject = participant_dataset.subject
+            features_df = participant_dataset.features_df
 
-            rows.append({
+            row = {
                 "subject_id": subject.id,
                 "subject_health": subject.health_state,
-                "subject_age": subject.age,
                 "subject_mmse": subject.mmse,
-            })
+                "subject_age": subject.age,
+            }
+
+            for channel in features_df.index:
+                for feature in features_df.columns:
+                    row[f"{channel}_{feature}"] = float(features_df.loc[channel, feature])
+
+            rows.append(row)
 
         return pd.DataFrame(rows)
-    
-    @property
-    def mean_feature_df(self):
-        return DataframeHelpers.mean([dataset.features_df for dataset in self.participant_datasets])
-    
+
+    def to_subject_dataframe(self) -> pd.DataFrame:
+        rows = []
+        for participant_dataset in self.participant_datasets:
+            subject = participant_dataset.subject
+            rows.append(
+                {
+                    "subject_id": subject.id,
+                    "subject_health": subject.health_state,
+                    "subject_age": subject.age,
+                    "subject_mmse": subject.mmse,
+                }
+            )
+        return pd.DataFrame(rows)
 
     @property
-    def selector(self):
+    def mean_feature_df(self) -> pd.DataFrame:
+        return DataframeHelpers.mean(
+            [dataset.features_df for dataset in self.participant_datasets]
+        )
+
+    @property
+    def mean_psd_df(self) -> pd.DataFrame:
+        return DataframeHelpers.mean(
+            [dataset.to_psd_dataframe() for dataset in self.participant_datasets]
+        )
+
+    @property
+    def selector(self) -> SampleSelector:
         return SampleSelector(self)
-
-
-
