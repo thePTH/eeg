@@ -368,3 +368,105 @@ class FeaturesDataset:
     @property
     def selector(self) -> SampleSelector:
         return SampleSelector(self)
+    
+
+
+
+
+from dataclasses import asdict
+from typing import Any
+
+import pandas as pd
+
+from features.results import (
+    FeatureExtractionResult,
+    PSDBandExtractionResult,
+    PPCBandExtractionResult,
+)
+
+
+class SingleParticipantProcessedFeatureDatasetFactory:
+    """
+    Factory pour construire un SingleParticipantProcessedFeatureDataset
+    à partir des objets de résultats d'extraction.
+
+    Cette factory centralise :
+    - la conversion des résultats features -> DataFrame
+    - la conversion des résultats PSD -> dict sérialisable
+    - la conversion des résultats PPC -> dict sérialisable
+    - l'emballage des métadonnées sujet / pipeline / EEG info
+
+    Remarque
+    --------
+    On stocke :
+    - les features sous forme de DataFrame
+    - la PSD et la PPC sous forme de dict
+      pour simplifier l'export / import du dataset
+    """
+
+    @staticmethod
+    def build(
+        *,
+        feature_result: FeatureExtractionResult,
+        psd_result: PSDBandExtractionResult,
+        ppc_result: PPCBandExtractionResult,
+        subject_dico: dict[str, Any],
+        pipeline_name: str,
+    ) -> "SingleParticipantProcessedFeatureDataset":
+        return SingleParticipantProcessedFeatureDataset(
+            features_df=SingleParticipantProcessedFeatureDatasetFactory._build_features_df(
+                feature_result
+            ),
+            psd_band_results=SingleParticipantProcessedFeatureDatasetFactory._build_psd_dict(
+                psd_result
+            ),
+            ppc_band_results=SingleParticipantProcessedFeatureDatasetFactory._build_ppc_dict(
+                ppc_result
+            ),
+            subject_dico=dict(subject_dico),
+            pipeline_name=str(pipeline_name),
+            eeg_info_dico=feature_result.eeg.info.to_json_dict(),
+        )
+
+    @staticmethod
+    def _build_features_df(feature_result: FeatureExtractionResult) -> pd.DataFrame:
+        """
+        Convertit le résultat d'extraction des features scalaires
+        en DataFrame [channels x features].
+        """
+        df = feature_result.dataframe.copy()
+
+        # On force les float pour éviter les surprises à l'export / import
+        for col in df.columns:
+            df[col] = df[col].astype(float)
+
+        return df
+
+    @staticmethod
+    def _build_psd_dict(psd_result: PSDBandExtractionResult) -> dict[str, dict[str, float]]:
+        """
+        Convertit le résultat PSD en dict sérialisable :
+        {
+            "Fp1": {"delta": ..., "theta": ..., ...},
+            ...
+        }
+        """
+        return {
+            signal_name: {
+                band_name: float(value)
+                for band_name, value in band_dict.items()
+            }
+            for signal_name, band_dict in psd_result.dico.items()
+        }
+
+    @staticmethod
+    def _build_ppc_dict(ppc_result: PPCBandExtractionResult) -> dict[str, list[list[float]]]:
+        """
+        Convertit le résultat PPC en dict sérialisable :
+        {
+            "delta": [[...], [...], ...],
+            "theta": [[...], [...], ...],
+            ...
+        }
+        """
+        return ppc_result.to_serializable_dict()
