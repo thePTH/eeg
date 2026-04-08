@@ -139,6 +139,7 @@ class SampleSelector:
         self._long_features_df_cache: pd.DataFrame | None = None
         self._long_psd_df_cache: pd.DataFrame | None = None
         self._long_ppc_df_cache: pd.DataFrame | None = None
+        self._subject_df_cache: pd.DataFrame | None = None
 
     @property
     def long_features_df(self) -> pd.DataFrame:
@@ -157,6 +158,12 @@ class SampleSelector:
         if self._long_ppc_df_cache is None:
             self._long_ppc_df_cache = self.dataset.to_long_ppc_dataframe()
         return self._long_ppc_df_cache
+
+    @property
+    def subject_df(self) -> pd.DataFrame:
+        if self._subject_df_cache is None:
+            self._subject_df_cache = self.dataset.to_subject_dataframe()
+        return self._subject_df_cache
 
 
 class FeaturesDataset:
@@ -240,6 +247,7 @@ class FeaturesDataset:
         Colonnes retournées
         ------------------
         subject_id, subject_age, subject_mmse, subject_health,
+        subject_group, subject_gender,
         channel, feature, value
         """
         rows: list[pd.DataFrame] = []
@@ -257,6 +265,8 @@ class FeaturesDataset:
             df_long["subject_id"] = subject.id
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
+            df_long["subject_group"] = subject.group
+            df_long["subject_gender"] = subject.gender
             df_long["subject_mmse"] = subject.mmse
 
             rows.append(df_long)
@@ -270,6 +280,7 @@ class FeaturesDataset:
         Colonnes retournées
         ------------------
         subject_id, subject_age, subject_mmse, subject_health,
+        subject_group, subject_gender,
         channel, band, value
         """
         rows: list[pd.DataFrame] = []
@@ -287,6 +298,8 @@ class FeaturesDataset:
             df_long["subject_id"] = subject.id
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
+            df_long["subject_group"] = subject.group
+            df_long["subject_gender"] = subject.gender
             df_long["subject_mmse"] = subject.mmse
 
             rows.append(df_long)
@@ -300,6 +313,7 @@ class FeaturesDataset:
         Colonnes retournées
         ------------------
         subject_id, subject_age, subject_mmse, subject_health,
+        subject_group, subject_gender,
         band, seed, target, edge, value
         """
         rows: list[pd.DataFrame] = []
@@ -311,6 +325,8 @@ class FeaturesDataset:
             df_long["subject_id"] = subject.id
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
+            df_long["subject_group"] = subject.group
+            df_long["subject_gender"] = subject.gender
             df_long["subject_mmse"] = subject.mmse
 
             rows.append(df_long)
@@ -327,6 +343,8 @@ class FeaturesDataset:
             row = {
                 "subject_id": subject.id,
                 "subject_health": subject.health_state,
+                "subject_group": subject.group,
+                "subject_gender": subject.gender,
                 "subject_mmse": subject.mmse,
                 "subject_age": subject.age,
             }
@@ -347,6 +365,8 @@ class FeaturesDataset:
                 {
                     "subject_id": subject.id,
                     "subject_health": subject.health_state,
+                    "subject_group": subject.group,
+                    "subject_gender": subject.gender,
                     "subject_age": subject.age,
                     "subject_mmse": subject.mmse,
                 }
@@ -368,9 +388,6 @@ class FeaturesDataset:
     @property
     def selector(self) -> SampleSelector:
         return SampleSelector(self)
-    
-
-
 
 
 from dataclasses import asdict
@@ -470,3 +487,4 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         }
         """
         return ppc_result.to_serializable_dict()
+
