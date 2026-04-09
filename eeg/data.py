@@ -185,7 +185,7 @@ class EEGRecordedDataHelper:
 
 
     @staticmethod
-    def split(eeg:EEGRecordedData, t_start:int=10,  window_seconds:int=60) ->list[EEGRecordedData] :
+    def split(eeg:EEGRecordedData, t_start:int=10,  window_seconds:int=60) -> list[EEGRecordedData] :
         total_duration = eeg.raw.times[-1]
 
         if t_start >= total_duration:
@@ -193,7 +193,7 @@ class EEGRecordedDataHelper:
 
         usable_duration = total_duration - t_start
         n_full_windows = int(usable_duration // window_seconds)
-        segments =  []
+        segments:list[EEGRecordedData] =  []
 
         for i in range(n_full_windows):
             tmin = t_start + i * window_seconds
