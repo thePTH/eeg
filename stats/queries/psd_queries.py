@@ -4,7 +4,7 @@ from typing import Optional
 from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PSDBandGroupComparisonQuery(GroupComparisonQuery):
     """
     Comparaison de groupes sur une bande PSD.
@@ -28,7 +28,7 @@ class PSDBandGroupComparisonQuery(GroupComparisonQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PSDBandCorrelationQuery(CorrelationQuery):
     """
     Corrélation entre une bande PSD et une covariable sujet-level.
@@ -53,7 +53,7 @@ class PSDBandCorrelationQuery(CorrelationQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PSDBandFactorialQuery(FactorialQuery):
     """
     Analyse factorielle sur une bande PSD.

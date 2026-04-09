@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectGroupComparisonQuery(GroupComparisonQuery):
     """
     Comparaison de groupes sur une variable sujet-level.
@@ -20,7 +20,7 @@ class SubjectGroupComparisonQuery(GroupComparisonQuery):
         return self.variable
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectCorrelationQuery(CorrelationQuery):
     """
     Corrélation entre deux variables sujet-level.
@@ -37,7 +37,7 @@ class SubjectCorrelationQuery(CorrelationQuery):
         return self.x_variable
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectFactorialQuery(FactorialQuery):
     """
     Analyse factorielle sur variable sujet-level.

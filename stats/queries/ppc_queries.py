@@ -4,7 +4,7 @@ from typing import Optional
 from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PPCBandGroupComparisonQuery(GroupComparisonQuery):
     """
     Comparaison de groupes sur une bande PPC.
@@ -32,7 +32,7 @@ class PPCBandGroupComparisonQuery(GroupComparisonQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PPCBandCorrelationQuery(CorrelationQuery):
     """
     Corrélation entre une bande PPC et une covariable sujet-level.
@@ -57,7 +57,7 @@ class PPCBandCorrelationQuery(CorrelationQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class PPCBandFactorialQuery(FactorialQuery):
     """
     Analyse factorielle sur une bande PPC.

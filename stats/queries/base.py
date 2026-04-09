@@ -1,11 +1,11 @@
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from .specs import CorrectionSpec, PostHocSpec
 from .types import Scope, TestKind
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class StatisticalQuery(ABC):
     """
     Classe racine de toutes les requêtes statistiques.
@@ -24,8 +24,55 @@ class StatisticalQuery(ABC):
     def target_name(self) -> str:
         raise NotImplementedError
 
+    def __repr__(self) -> str:
+        """
+        Représentation compacte et lisible pour debug / logs / notebook.
 
-@dataclass(frozen=True, kw_only=True)
+        Exemple
+        --------
+        SubjectGroupComparisonQuery(
+            target=mmse,
+            test=wilcoxon_rank_sum,
+            scope=subject,
+            group_col=subject_health,
+            group_a=Healthy,
+            group_b=Alzheimer
+        )
+        """
+
+        class_name = self.__class__.__name__
+
+        core = [
+            f"target={self.target_name}",
+            f"test={self.test_kind}",
+            f"scope={self.scope}",
+        ]
+
+        extras = []
+
+        for f in fields(self):
+            name = f.name
+
+            if name in {"test_kind", "scope", "correction"}:
+                continue
+
+            value = getattr(self, name)
+
+            if value is not None:
+                extras.append(f"{name}={value}")
+
+        if self.correction is not None:
+            extras.append(f"correction={self.correction.method}")
+
+        args = ", ".join(core + extras)
+
+        return f"{class_name}({args})"
+    
+    def __str__(self):
+        return self.__repr__()
+
+
+@dataclass(frozen=True, kw_only=True, repr=False)
 class GroupComparisonQuery(StatisticalQuery, ABC):
     """
     Requête abstraite pour comparer deux groupes.
@@ -35,7 +82,7 @@ class GroupComparisonQuery(StatisticalQuery, ABC):
     group_b: str
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class CorrelationQuery(StatisticalQuery, ABC):
     """
     Requête abstraite pour corrélation entre deux variables.
@@ -43,7 +90,7 @@ class CorrelationQuery(StatisticalQuery, ABC):
     pass
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class FactorialQuery(StatisticalQuery, ABC):
     """
     Requête abstraite pour design factoriel.

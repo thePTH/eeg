@@ -4,7 +4,7 @@ from typing import Optional
 from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class EEGFeatureGroupComparisonQuery(GroupComparisonQuery):
     """
     Comparaison de groupes sur une feature EEG scalaire.
@@ -28,7 +28,7 @@ class EEGFeatureGroupComparisonQuery(GroupComparisonQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class EEGFeatureCorrelationQuery(CorrelationQuery):
     """
     Corrélation entre une feature EEG et une covariable sujet-level.
@@ -53,7 +53,7 @@ class EEGFeatureCorrelationQuery(CorrelationQuery):
             )
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, repr=False)
 class EEGFeatureFactorialQuery(FactorialQuery):
     """
     Analyse factorielle sur une feature EEG.
