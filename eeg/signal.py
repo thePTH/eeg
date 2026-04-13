@@ -1,52 +1,74 @@
-from maths.engines.wavelets import SignalWaveletAnalysisResult, SignalWaveletAnalysisEngine
-from maths.engines.statistics import SignalStatisticsAnalysisResult, SignalStatisticsAnalysisEngine
-from maths.engines.spectral import SignalSpectralAnalysisResult, SignalSpectralAnalysisEngine
-from maths.engines.parameters import SignalAnalysisEngineParametersFactory
+from __future__ import annotations
+
 from dataclasses import dataclass
-from features.config import FeatureExtractionConfig
-import numpy as np
 from functools import cached_property
+
+import numpy as np
+
+from features.config import FeatureExtractionConfig
+from maths.engines.parameters import SignalAnalysisEngineParametersFactory
+from maths.engines.spectral import (
+    SignalSpectralAnalysisEngine,
+    SignalSpectralAnalysisResult,
+)
+from maths.engines.statistics import (
+    SignalStatisticsAnalysisEngine,
+    SignalStatisticsAnalysisResult,
+)
+from maths.engines.wavelets import (
+    SignalWaveletAnalysisEngine,
+    SignalWaveletAnalysisResult,
+)
 
 
 class SampledSignal:
-    def __init__(self, sampling_frequency:float, points:list[float], name:str):
-        self._sampling_frequency = sampling_frequency
-        self._points = points
+    """
+    Représente un signal échantillonné 1D.
+
+    Amélioration mémoire
+    --------------------
+    Les points sont stockés en `np.ndarray` plutôt qu'en `list[float]`.
+    Cela évite des conversions coûteuses et garde une meilleure compatibilité
+    avec les moteurs de calcul scientifiques.
+    """
+
+    def __init__(self, sampling_frequency: float, points, name: str):
+        self._sampling_frequency = float(sampling_frequency)
+        self._points = np.asarray(points, dtype=float)
         self._name = name
 
     @property
-    def points(self):
+    def points(self) -> np.ndarray:
         return self._points
-    
+
     @property
-    def sampling_frequency(self):
+    def sampling_frequency(self) -> float:
         return self._sampling_frequency
-        
+
     @property
-    def time_axis(self):
-        return [k / self.sampling_frequency for k in range(len(self.points))]
-    
+    def time_axis(self) -> np.ndarray:
+        return np.arange(len(self.points), dtype=float) / self.sampling_frequency
+
     @property
-    def name(self):
+    def name(self) -> str:
         return self._name
-       
 
 
 @dataclass(frozen=True)
 class SignalAnalysisResults:
-    signal:SampledSignal
-    config:FeatureExtractionConfig
+    signal: SampledSignal
+    config: FeatureExtractionConfig
     stats: SignalStatisticsAnalysisResult
     spectral: SignalSpectralAnalysisResult
     wavelet: SignalWaveletAnalysisResult
 
+
 class SignalAnalysisEngine:
-    def __init__(self, signal:SampledSignal, config:FeatureExtractionConfig):
+    def __init__(self, signal: SampledSignal, config: FeatureExtractionConfig):
         self.signal = signal
-        self.x = np.array(signal.points)
+        self.x = np.asarray(signal.points, dtype=float)
         self.fs = signal.sampling_frequency
         self.config = config
-
 
     @cached_property
     def stats(self) -> SignalStatisticsAnalysisResult:
@@ -54,12 +76,16 @@ class SignalAnalysisEngine:
 
     @cached_property
     def spectral(self) -> SignalSpectralAnalysisResult:
-        params = SignalAnalysisEngineParametersFactory.build_spectral_engine_parameters(self.config)
+        params = SignalAnalysisEngineParametersFactory.build_spectral_engine_parameters(
+            self.config
+        )
         return SignalSpectralAnalysisEngine(self.x, self.fs, params).compute()
 
     @cached_property
     def wavelet(self) -> SignalWaveletAnalysisResult:
-        params = SignalAnalysisEngineParametersFactory.build_wavelet_engine_parameters(self.config)
+        params = SignalAnalysisEngineParametersFactory.build_wavelet_engine_parameters(
+            self.config
+        )
         return SignalWaveletAnalysisEngine(self.x, params).compute()
 
     def compute(self) -> SignalAnalysisResults:
@@ -68,10 +94,8 @@ class SignalAnalysisEngine:
             config=self.config,
             stats=self.stats,
             spectral=self.spectral,
-            wavelet=self.wavelet
+            wavelet=self.wavelet,
         )
-
-
 
 
 @dataclass(frozen=True)

@@ -14,33 +14,60 @@ class SingleParticipantProcessedFeatureDatasetIO:
         """
         Exporte un SingleParticipantProcessedFeatureDataset dans un dossier structuré.
 
-        Structure créée :
+        Structure créée
+        ----------------
         path/
-        └── sub-<id>/
+        └── sub-<id>-rec-XX/
             ├── features.parquet
             ├── psd_band_results.json
             ├── ppc_band_results.json
             └── metadata.json
+
+        XX est automatiquement incrémenté selon les enregistrements déjà présents.
         """
 
-        path = Path(path) / f"sub-{dataset.subject_dico['id']}"
+        path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
-        dataset.features_df.to_parquet(path / "features.parquet")
+        subject_id = dataset.subject_dico["id"]
+        subject_prefix = f"sub-{subject_id}-rec-"
 
-        with open(path / "psd_band_results.json", "w") as f:
+        # Recherche des enregistrements existants
+        existing_indices = []
+
+        for folder in path.iterdir():
+            if folder.is_dir() and folder.name.startswith(subject_prefix):
+                suffix = folder.name.replace(subject_prefix, "")
+                if suffix.isdigit():
+                    existing_indices.append(int(suffix))
+
+        # Détermine le prochain index disponible
+        next_index = 1 if not existing_indices else max(existing_indices) + 1
+
+        recording_key = f"{next_index:02d}"
+
+        export_folder = path / f"{subject_prefix}{recording_key}"
+        export_folder.mkdir(parents=True, exist_ok=True)
+
+        # Sauvegarde features
+        dataset.features_df.to_parquet(export_folder / "features.parquet")
+
+        # Sauvegarde PSD
+        with open(export_folder / "psd_band_results.json", "w") as f:
             json.dump(dataset.psd_band_results, f)
 
-        with open(path / "ppc_band_results.json", "w") as f:
+        # Sauvegarde PPC
+        with open(export_folder / "ppc_band_results.json", "w") as f:
             json.dump(dataset.ppc_band_results, f)
 
         metadata = {
             "subject_dico": dataset.subject_dico,
             "pipeline_name": dataset.pipeline_name,
             "eeg_info_dico": dataset.eeg_info_dico,
+            "recording_key": recording_key,
         }
 
-        with open(path / "metadata.json", "w") as f:
+        with open(export_folder / "metadata.json", "w") as f:
             json.dump(metadata, f)
 
     @staticmethod
@@ -48,7 +75,6 @@ class SingleParticipantProcessedFeatureDatasetIO:
         """
         Recharge un SingleParticipantProcessedFeatureDataset depuis un dossier exporté.
         """
-
         path = Path(path)
 
         features_df = pd.read_parquet(path / "features.parquet")
@@ -79,7 +105,10 @@ class FeaturesDatasetIO:
         folder.mkdir(parents=True, exist_ok=True)
 
         for participant_dataset in dataset.participant_datasets:
-            SingleParticipantProcessedFeatureDatasetIO.export(participant_dataset, folder)
+            SingleParticipantProcessedFeatureDatasetIO.export(
+                participant_dataset,
+                folder,
+            )
 
     @staticmethod
     def load(folder_name_path: str | Path):

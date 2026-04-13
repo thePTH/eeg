@@ -1,8 +1,13 @@
-from preprocessing.step.base import PreprocessingStep, EEGData
+from __future__ import annotations
+
+import mne
+
+from eeg.data import EEGData
+from preprocessing.step.base import PreprocessingStep
 
 
 class CropStep(PreprocessingStep):
-    def __init__(self, tmin: float, tmax:float=None):
+    def __init__(self, tmin: float, tmax: float | None = None):
         self._tmin = tmin
         self._tmax = tmax
 
@@ -12,13 +17,16 @@ class CropStep(PreprocessingStep):
 
     @property
     def params(self) -> dict:
-        return {"tmin": self._tmin, "tmax":self._tmax}
+        return {
+            "tmin": self._tmin,
+            "tmax": self._tmax,
+        }
 
-    def transform(self, eeg_data):
-        new_eeg = eeg_data.copy()
-        raw = new_eeg.raw
-        new_raw = raw.crop(self._tmin, self._tmax, verbose = False)
-        new_eeg._raw = new_raw
-
-
-        return new_eeg
+    def transform_raw(
+        self,
+        raw: mne.io.Raw,
+        *,
+        eeg_data: EEGData | None = None,
+    ) -> mne.io.Raw:
+        raw.crop(self._tmin, self._tmax, verbose=False)
+        return raw

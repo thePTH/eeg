@@ -1144,6 +1144,8 @@ class FeaturesDataset:
             [dataset.to_psd_dataframe() for dataset in self.participant_datasets]
         )
 
+
+from features.factory import CompleteFeatureExtractionResult
 class SingleParticipantProcessedFeatureDatasetFactory:
     """
     Factory pour construire un SingleParticipantProcessedFeatureDataset
@@ -1155,36 +1157,29 @@ class SingleParticipantProcessedFeatureDatasetFactory:
     - la conversion des résultats PPC -> dict sérialisable
     - l'emballage des métadonnées sujet / pipeline / EEG info
 
-    Remarque
-    --------
-    On stocke :
-    - les features sous forme de DataFrame
-    - la PSD et la PPC sous forme de dict
-      pour simplifier l'export / import du dataset
+    Point important
+    ---------------
+    On utilise désormais le snapshot `eeg_info_dico` déjà capturé au moment
+    de l'extraction, afin de ne jamais dépendre d'un `Raw` encore chargé.
     """
 
     @staticmethod
     def build(
-        *,
-        feature_result: FeatureExtractionResult,
-        psd_result: PSDBandExtractionResult,
-        ppc_result: PPCBandExtractionResult,
-        subject_dico: dict[str, Any],
-        pipeline_name: str,
+        complete_extraction_result:CompleteFeatureExtractionResult
     ) -> "SingleParticipantProcessedFeatureDataset":
         return SingleParticipantProcessedFeatureDataset(
             features_df=SingleParticipantProcessedFeatureDatasetFactory._build_features_df(
-                feature_result
+                complete_extraction_result.feature_result
             ),
             psd_band_results=SingleParticipantProcessedFeatureDatasetFactory._build_psd_dict(
-                psd_result
+                complete_extraction_result.psd_result
             ),
             ppc_band_results=SingleParticipantProcessedFeatureDatasetFactory._build_ppc_dict(
-                ppc_result
+                complete_extraction_result.ppc_result
             ),
-            subject_dico=dict(subject_dico),
-            pipeline_name=str(pipeline_name),
-            eeg_info_dico=feature_result.eeg.info.to_json_dict(),
+            subject_dico=dict(complete_extraction_result.feature_result.eeg.source.subject.to_dict()),
+            pipeline_name=str(complete_extraction_result.feature_result.eeg.pipeline_name),
+            eeg_info_dico=dict(complete_extraction_result.feature_result.eeg_info_dico),
         )
 
     @staticmethod
@@ -1195,38 +1190,36 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         """
         df = feature_result.dataframe.copy()
 
-        # On force les float pour éviter les surprises à l'export / import
         for col in df.columns:
             df[col] = df[col].astype(float)
 
         return df
 
     @staticmethod
-    def _build_psd_dict(psd_result: PSDBandExtractionResult) -> dict[str, dict[str, float]]:
+    def _build_psd_dict(
+        psd_result: PSDBandExtractionResult,
+    ) -> dict[str, dict[str, float]]:
         """
-        Convertit le résultat PSD en dict sérialisable :
-        {
-            "Fp1": {"delta": ..., "theta": ..., ...},
-            ...
-        }
+        Convertit le résultat PSD en dictionnaire sérialisable.
         """
-        return {
-            signal_name: {
+        result: dict[str, dict[str, float]] = {}
+
+        for signal_name, band_dict in psd_result.dico.items():
+            result[signal_name] = {
                 band_name: float(value)
                 for band_name, value in band_dict.items()
             }
-            for signal_name, band_dict in psd_result.dico.items()
-        }
+
+        return result
 
     @staticmethod
-    def _build_ppc_dict(ppc_result: PPCBandExtractionResult) -> dict[str, list[list[float]]]:
+    def _build_ppc_dict(
+        ppc_result: PPCBandExtractionResult,
+    ) -> dict[str, list[list[float]]]:
         """
-        Convertit le résultat PPC en dict sérialisable :
-        {
-            "delta": [[...], [...], ...],
-            "theta": [[...], [...], ...],
-            ...
+        Convertit le résultat PPC en dictionnaire sérialisable JSON-friendly.
+        """
+        return {
+            band_name: ppc_result.matrix(band_name).tolist()
+            for band_name in ppc_result.band_names
         }
-        """
-        return ppc_result.to_serializable_dict()
-
