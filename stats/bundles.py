@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from stats.queries.base import StatisticalQuery
 from stats.queries.eeg_queries import (
     EEGFeatureCorrelationQuery,
     EEGFeatureFactorialQuery,
@@ -26,14 +27,13 @@ from stats.queries.subject_queries import (
     SubjectFactorialQuery,
     SubjectGroupComparisonQuery,
 )
-from stats.queries.base import StatisticalQuery
 
 
 # ======================================================================================
 #                                      BUNDLES
 # ======================================================================================
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SampleBundle(ABC):
     """
     Bundle générique d'échantillons prêt à être consommé par un engine statistique.
@@ -48,7 +48,7 @@ class SampleBundle(ABC):
         raise NotImplementedError
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GroupComparisonSampleBundle(SampleBundle):
     """
     Bundle pour une comparaison entre deux groupes.
@@ -75,7 +75,7 @@ class GroupComparisonSampleBundle(SampleBundle):
         return f"{self.x_name} vs {self.y_name}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CorrelationSampleBundle(SampleBundle):
     """
     Bundle pour une corrélation entre deux variables.
@@ -102,7 +102,7 @@ class CorrelationSampleBundle(SampleBundle):
         return f"{self.x_name} vs {self.y_name}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OneWayANOVASampleBundle(SampleBundle):
     """
     Bundle pour une ANOVA à un facteur.
@@ -126,7 +126,7 @@ class OneWayANOVASampleBundle(SampleBundle):
         return {str(level): int(count) for level, count in grouped.items()}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TwoWayANOVASampleBundle(SampleBundle):
     """
     Bundle pour une ANOVA à deux facteurs.
@@ -148,13 +148,10 @@ class TwoWayANOVASampleBundle(SampleBundle):
     def cell_sizes(self) -> dict[str, int]:
         grouped = (
             self.dataframe
-            .groupby([self.factor_a_name, self.factor_b_name], dropna=False)
+            .groupby([self.factor_a_name, self.factor_b_name], dropna=False, observed=False)
             .size()
         )
-        return {
-            f"{str(a)}__{str(b)}": int(n)
-            for (a, b), n in grouped.items()
-        }
+        return {f"{str(a)}__{str(b)}": int(n) for (a, b), n in grouped.items()}
 
 
 # ======================================================================================
@@ -172,10 +169,10 @@ class SampleBundleFactory:
     -----------
     Cette factory ne reconstruit pas les données métier.
     Elle s'appuie sur les vues déjà exposées par `FeaturesDataset` :
-    - to_subject_dataframe()
-    - to_long_dataframe()
-    - to_long_psd_dataframe()
-    - to_long_ppc_dataframe()
+    - dataset.subject_dataframe
+    - dataset.long_dataframe
+    - dataset.long_psd_dataframe
+    - dataset.long_ppc_dataframe
     """
 
     # ------------------------------------------------------------------
@@ -347,6 +344,25 @@ class SampleBundleFactory:
             )
 
     @staticmethod
+    def _subset_and_dropna(
+        df: pd.DataFrame,
+        *,
+        mask: pd.Series | None = None,
+        columns: list[str],
+    ) -> pd.DataFrame:
+        """
+        Sélectionne éventuellement un sous-ensemble de lignes puis garde
+        uniquement les colonnes utiles avant `dropna()`.
+
+        Cela réduit la mémoire temporaire et accélère les traitements.
+        """
+        if mask is not None:
+            df = df.loc[mask, columns]
+        else:
+            df = df.loc[:, columns]
+        return df.dropna()
+
+    @staticmethod
     def _build_factorial_bundle_from_dataframe(
         *,
         df: pd.DataFrame,
@@ -366,7 +382,10 @@ class SampleBundleFactory:
 
         if len(factors) == 1:
             factor = factors[0]
-            sub = df[[value_col, factor]].dropna().copy()
+            sub = SampleBundleFactory._subset_and_dropna(
+                df,
+                columns=[value_col, factor],
+            )
 
             if sub.empty:
                 raise ValueError(
@@ -382,22 +401,104 @@ class SampleBundleFactory:
 
         if len(factors) == 2:
             factor_a, factor_b = factors
-            sub = df[[value_col, factor_a, factor_b]].dropna().copy()
+            sub = SampleBundleFactory._subset_and_dropna(
+                df,
+                columns=[value_col, factor_a, factor_b],
+            )
 
             if sub.empty:
                 raise ValueError(
                     f"No valid observations found for two-way ANOVA on '{dependent_name}'."
                 )
 
+            sub = sub.rename(columns={value_col: "value"})
+
             return TwoWayANOVASampleBundle(
-                dataframe=sub.rename(columns={value_col: "value"}).copy(),
+                dataframe=sub,
                 dependent_name=dependent_name,
                 factor_a_name=factor_a,
                 factor_b_name=factor_b,
             )
 
-        raise ValueError(
-            "Factorial bundle only supports one-way or two-way designs."
+        raise ValueError("Factorial bundle only supports one-way or two-way designs.")
+
+    @staticmethod
+    def _build_group_comparison_bundle_from_dataframe(
+        *,
+        df: pd.DataFrame,
+        value_col: str,
+        group_col: str,
+        group_a: str,
+        group_b: str,
+        x_name: str,
+        y_name: str,
+        error_context: str,
+    ) -> GroupComparisonSampleBundle:
+        """
+        Helper générique pour construire un bundle de comparaison de groupes.
+        """
+        SampleBundleFactory._require_columns(
+            df,
+            [value_col, group_col],
+            context=error_context,
+        )
+
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            columns=[value_col, group_col],
+        )
+
+        if sub.empty:
+            raise ValueError(f"No samples found for {error_context}.")
+
+        x = sub.loc[sub[group_col] == group_a, value_col]
+        y = sub.loc[sub[group_col] == group_b, value_col]
+
+        if x.empty or y.empty:
+            raise ValueError(
+                f"No samples found for {error_context}: "
+                f"group_a='{group_a}', group_b='{group_b}'."
+            )
+
+        return GroupComparisonSampleBundle(
+            x=x,
+            y=y,
+            x_name=x_name,
+            y_name=y_name,
+        )
+
+    @staticmethod
+    def _build_correlation_bundle_from_dataframe(
+        *,
+        df: pd.DataFrame,
+        x_col: str,
+        y_col: str,
+        x_name: str,
+        y_name: str,
+        error_context: str,
+    ) -> CorrelationSampleBundle:
+        """
+        Helper générique pour construire un bundle de corrélation.
+        """
+        SampleBundleFactory._require_columns(
+            df,
+            [x_col, y_col],
+            context=error_context,
+        )
+
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            columns=[x_col, y_col],
+        )
+
+        if sub.empty:
+            raise ValueError(f"No samples found for {error_context}.")
+
+        return CorrelationSampleBundle(
+            x=sub[x_col],
+            y=sub[y_col],
+            x_name=x_name,
+            y_name=y_name,
         )
 
     # ------------------------------------------------------------------
@@ -409,28 +510,19 @@ class SampleBundleFactory:
         query: SubjectGroupComparisonQuery,
         dataset: Any,
     ) -> GroupComparisonSampleBundle:
-        df = dataset.to_subject_dataframe()
+        df = dataset.subject_dataframe
 
-        SampleBundleFactory._require_columns(
-            df,
-            [query.group_col, query.variable],
-            context="subject-level group comparison",
-        )
-
-        x = df.loc[df[query.group_col] == query.group_a, query.variable].dropna()
-        y = df.loc[df[query.group_col] == query.group_b, query.variable].dropna()
-
-        if x.empty or y.empty:
-            raise ValueError(
-                f"No samples found for subject-level comparison: variable='{query.variable}', "
-                f"group_a='{query.group_a}', group_b='{query.group_b}'."
-            )
-
-        return GroupComparisonSampleBundle(
-            x=x,
-            y=y,
+        return SampleBundleFactory._build_group_comparison_bundle_from_dataframe(
+            df=df,
+            value_col=query.variable,
+            group_col=query.group_col,
+            group_a=query.group_a,
+            group_b=query.group_b,
             x_name=f"{query.variable} ({query.group_a})",
             y_name=f"{query.variable} ({query.group_b})",
+            error_context=(
+                f"subject-level comparison for variable='{query.variable}'"
+            ),
         )
 
     @staticmethod
@@ -438,27 +530,17 @@ class SampleBundleFactory:
         query: SubjectCorrelationQuery,
         dataset: Any,
     ) -> CorrelationSampleBundle:
-        df = dataset.to_subject_dataframe()
+        df = dataset.subject_dataframe
 
-        SampleBundleFactory._require_columns(
-            df,
-            [query.x_variable, query.y_variable],
-            context="subject-level correlation",
-        )
-
-        sub = df[[query.x_variable, query.y_variable]].dropna()
-
-        if sub.empty:
-            raise ValueError(
-                f"No samples found for subject-level correlation: "
-                f"{query.x_variable} vs {query.y_variable}."
-            )
-
-        return CorrelationSampleBundle(
-            x=sub[query.x_variable],
-            y=sub[query.y_variable],
+        return SampleBundleFactory._build_correlation_bundle_from_dataframe(
+            df=df,
+            x_col=query.x_variable,
+            y_col=query.y_variable,
             x_name=query.x_variable,
             y_name=query.y_variable,
+            error_context=(
+                f"subject-level correlation: {query.x_variable} vs {query.y_variable}"
+            ),
         )
 
     @staticmethod
@@ -466,7 +548,7 @@ class SampleBundleFactory:
         query: SubjectFactorialQuery,
         dataset: Any,
     ) -> SampleBundle:
-        df = dataset.to_subject_dataframe()
+        df = dataset.subject_dataframe
 
         return SampleBundleFactory._build_factorial_bundle_from_dataframe(
             df=df,
@@ -485,7 +567,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
-        df = dataset.to_long_dataframe()
+        df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -493,10 +575,21 @@ class SampleBundleFactory:
             context=f"EEG group comparison for feature='{query.feature}'",
         )
 
-        sub = df[(df["feature"] == query.feature) & (df["channel"] == key)]
+        mask = (df["feature"] == query.feature) & (df["channel"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.group_col],
+        )
 
-        x = sub.loc[sub[query.group_col] == query.group_a, "value"].dropna()
-        y = sub.loc[sub[query.group_col] == query.group_b, "value"].dropna()
+        if sub.empty:
+            raise ValueError(
+                f"No samples found for EEG group comparison: "
+                f"feature='{query.feature}', channel='{key}'."
+            )
+
+        x = sub.loc[sub[query.group_col] == query.group_a, "value"]
+        y = sub.loc[sub[query.group_col] == query.group_b, "value"]
 
         if x.empty or y.empty:
             raise ValueError(
@@ -518,7 +611,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
-        df = dataset.to_long_dataframe()
+        df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -526,8 +619,12 @@ class SampleBundleFactory:
             context=f"EEG correlation for feature='{query.feature}'",
         )
 
-        sub = df[(df["feature"] == query.feature) & (df["channel"] == key)]
-        sub = sub[["value", query.covariate]].dropna()
+        mask = (df["feature"] == query.feature) & (df["channel"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.covariate],
+        )
 
         if sub.empty:
             raise ValueError(
@@ -548,7 +645,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
-        df = dataset.to_long_dataframe()
+        df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -556,7 +653,8 @@ class SampleBundleFactory:
             context=f"EEG factorial analysis for feature='{query.feature}'",
         )
 
-        sub = df[(df["feature"] == query.feature) & (df["channel"] == key)]
+        mask = (df["feature"] == query.feature) & (df["channel"] == key)
+        sub = df.loc[mask, ["value", *query.factor_names]]
 
         return SampleBundleFactory._build_factorial_bundle_from_dataframe(
             df=sub,
@@ -575,7 +673,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
-        df = dataset.to_long_psd_dataframe()
+        df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -583,10 +681,21 @@ class SampleBundleFactory:
             context=f"PSD group comparison for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["channel"] == key)]
+        mask = (df["band"] == query.band) & (df["channel"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.group_col],
+        )
 
-        x = sub.loc[sub[query.group_col] == query.group_a, "value"].dropna()
-        y = sub.loc[sub[query.group_col] == query.group_b, "value"].dropna()
+        if sub.empty:
+            raise ValueError(
+                f"No samples found for PSD group comparison: "
+                f"band='{query.band}', channel='{key}'."
+            )
+
+        x = sub.loc[sub[query.group_col] == query.group_a, "value"]
+        y = sub.loc[sub[query.group_col] == query.group_b, "value"]
 
         if x.empty or y.empty:
             raise ValueError(
@@ -608,7 +717,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
-        df = dataset.to_long_psd_dataframe()
+        df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -616,8 +725,12 @@ class SampleBundleFactory:
             context=f"PSD correlation for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["channel"] == key)]
-        sub = sub[["value", query.covariate]].dropna()
+        mask = (df["band"] == query.band) & (df["channel"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.covariate],
+        )
 
         if sub.empty:
             raise ValueError(
@@ -638,7 +751,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
-        df = dataset.to_long_psd_dataframe()
+        df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -646,7 +759,8 @@ class SampleBundleFactory:
             context=f"PSD factorial analysis for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["channel"] == key)]
+        mask = (df["band"] == query.band) & (df["channel"] == key)
+        sub = df.loc[mask, ["value", *query.factor_names]]
 
         return SampleBundleFactory._build_factorial_bundle_from_dataframe(
             df=sub,
@@ -665,7 +779,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
-        df = dataset.to_long_ppc_dataframe()
+        df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -673,10 +787,21 @@ class SampleBundleFactory:
             context=f"PPC group comparison for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["edge"] == key)]
+        mask = (df["band"] == query.band) & (df["edge"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.group_col],
+        )
 
-        x = sub.loc[sub[query.group_col] == query.group_a, "value"].dropna()
-        y = sub.loc[sub[query.group_col] == query.group_b, "value"].dropna()
+        if sub.empty:
+            raise ValueError(
+                f"No samples found for PPC group comparison: "
+                f"band='{query.band}', edge='{key}'."
+            )
+
+        x = sub.loc[sub[query.group_col] == query.group_a, "value"]
+        y = sub.loc[sub[query.group_col] == query.group_b, "value"]
 
         if x.empty or y.empty:
             raise ValueError(
@@ -698,7 +823,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
-        df = dataset.to_long_ppc_dataframe()
+        df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -706,8 +831,12 @@ class SampleBundleFactory:
             context=f"PPC correlation for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["edge"] == key)]
-        sub = sub[["value", query.covariate]].dropna()
+        mask = (df["band"] == query.band) & (df["edge"] == key)
+        sub = SampleBundleFactory._subset_and_dropna(
+            df,
+            mask=mask,
+            columns=["value", query.covariate],
+        )
 
         if sub.empty:
             raise ValueError(
@@ -728,7 +857,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
-        df = dataset.to_long_ppc_dataframe()
+        df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(
             df,
@@ -736,7 +865,8 @@ class SampleBundleFactory:
             context=f"PPC factorial analysis for band='{query.band}'",
         )
 
-        sub = df[(df["band"] == query.band) & (df["edge"] == key)]
+        mask = (df["band"] == query.band) & (df["edge"] == key)
+        sub = df.loc[mask, ["value", *query.factor_names]]
 
         return SampleBundleFactory._build_factorial_bundle_from_dataframe(
             df=sub,

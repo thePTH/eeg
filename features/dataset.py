@@ -13,48 +13,45 @@ from utils.dataframe import DataframeHelpers
 from utils.enum import EnumParser
 
 
-def _canonical_edge_key(seed: str, target: str) -> str:
-    """
-    Construit une clé canonique d'arête non orientée.
 
-    Exemple
-    -------
-    >>> _canonical_edge_key("Fp2", "Fp1")
-    'Fp1__Fp2'
-    """
+from dataclasses import dataclass
+from functools import cached_property
+from typing import Any
+
+import mne
+import numpy as np
+import pandas as pd
+
+from participants.definition import ParticipantFactory
+
+
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import mne
+import numpy as np
+import pandas as pd
+
+from participants.definition import ParticipantFactory
+
+
+def _canonical_edge_key(seed: str, target: str) -> str:
     a, b = sorted((str(seed), str(target)))
     return f"{a}__{b}"
 
 
-@dataclass
+@dataclass(slots=True)
 class SingleParticipantProcessedFeatureDataset:
     """
     Dataset sujet-level après extraction complète.
 
-    Paramètres
+    Notes perf
     ----------
-    features_df:
-        DataFrame principal des features scalaires, indexé par canal.
-        shape attendue = (n_channels, n_features)
-
-    psd_band_results:
-        Résultats PSD agrégés par bande et par canal.
-        Format attendu :
-        {
-            "Fp1": {"delta": ..., "theta": ..., ...},
-            "Fp2": {...},
-            ...
-        }
-
-    ppc_band_results:
-        Résultats PPC agrégés par bande.
-        Format attendu :
-        {
-            "delta": [[...], [...], ...],
-            "theta": [[...], [...], ...],
-            ...
-        }
-        ou bien directement des np.ndarray.
+    - `features_df` est supposé relativement petit par sujet, mais nombreux au total.
+    - `ppc_band_results` doit idéalement contenir des matrices numpy float32.
+    - Le cache est manuel car `cached_property` ne fonctionne pas avec `slots=True`
+      sans `__dict__`.
     """
 
     features_df: pd.DataFrame
@@ -64,9 +61,25 @@ class SingleParticipantProcessedFeatureDataset:
     pipeline_name: str
     eeg_info_dico: dict[str, Any]
 
-    def __post_init__(self):
-        self.subject = ParticipantFactory.build(self.subject_dico)
-        self.eeg_info = mne.Info.from_json_dict(self.eeg_info_dico)
+    _subject_cache: Any = field(init=False, default=None, repr=False)
+    _eeg_info_cache: Any = field(init=False, default=None, repr=False)
+    _ppc_upper_triangle_indices_cache: tuple[np.ndarray, np.ndarray] | None = field(
+        init=False, default=None, repr=False
+    )
+    _ppc_edge_keys_cache: list[str] | None = field(init=False, default=None, repr=False)
+    _ppc_edge_dataframe_cache: pd.DataFrame | None = field(init=False, default=None, repr=False)
+
+    @property
+    def subject(self):
+        if self._subject_cache is None:
+            self._subject_cache = ParticipantFactory.build(self.subject_dico)
+        return self._subject_cache
+
+    @property
+    def eeg_info(self):
+        if self._eeg_info_cache is None:
+            self._eeg_info_cache = mne.Info.from_json_dict(self.eeg_info_dico)
+        return self._eeg_info_cache
 
     @property
     def feature_names(self) -> list[str]:
@@ -87,47 +100,77 @@ class SingleParticipantProcessedFeatureDataset:
     def ppc_band_names(self) -> list[str]:
         return list(self.ppc_band_results.keys())
 
-    def ppc_matrix(self, band_name: str) -> np.ndarray:
+    def ppc_matrix(self, band_name: str, dtype=np.float32) -> np.ndarray:
         if band_name not in self.ppc_band_results:
             raise KeyError(
                 f"Unknown PPC band '{band_name}'. Available bands: {self.ppc_band_names}"
             )
-        return np.asarray(self.ppc_band_results[band_name], dtype=float)
+
+        arr = self.ppc_band_results[band_name]
+        if isinstance(arr, np.ndarray):
+            return arr.astype(dtype, copy=False)
+
+        return np.asarray(arr, dtype=dtype)
+
+    @property
+    def ppc_upper_triangle_indices(self) -> tuple[np.ndarray, np.ndarray]:
+        if self._ppc_upper_triangle_indices_cache is None:
+            n = len(self.ch_names)
+            self._ppc_upper_triangle_indices_cache = np.triu_indices(n, k=1)
+        return self._ppc_upper_triangle_indices_cache
 
     @property
     def ppc_edge_keys(self) -> list[str]:
-        ch_names = self.ch_names
-        keys: list[str] = []
-        for i in range(len(ch_names)):
-            for j in range(i + 1, len(ch_names)):
-                keys.append(_canonical_edge_key(ch_names[i], ch_names[j]))
-        return keys
+        if self._ppc_edge_keys_cache is None:
+            ch_names = self.ch_names
+            ii, jj = self.ppc_upper_triangle_indices
+            self._ppc_edge_keys_cache = [
+                _canonical_edge_key(ch_names[i], ch_names[j])
+                for i, j in zip(ii.tolist(), jj.tolist())
+            ]
+        return self._ppc_edge_keys_cache
 
     def to_psd_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame.from_dict(self.psd_band_results, orient="index")
 
-    def to_ppc_edge_dataframe(self) -> pd.DataFrame:
-        rows: list[dict[str, Any]] = []
-        ch_names = self.ch_names
+    @property
+    def ppc_edge_dataframe(self) -> pd.DataFrame:
+        if self._ppc_edge_dataframe_cache is None:
+            rows: list[pd.DataFrame] = []
 
-        for band_name in self.ppc_band_names:
-            mat = self.ppc_matrix(band_name)
-            ii, jj = np.triu_indices_from(mat, k=1)
-            for i, j in zip(ii.tolist(), jj.tolist()):
-                seed = ch_names[i]
-                target = ch_names[j]
-                rows.append(
+            ch_names = self.ch_names
+            ii, jj = self.ppc_upper_triangle_indices
+
+            seed_arr = np.array([ch_names[i] for i in ii], dtype=object)
+            target_arr = np.array([ch_names[j] for j in jj], dtype=object)
+            edge_arr = np.array(
+                [_canonical_edge_key(ch_names[i], ch_names[j]) for i, j in zip(ii, jj)],
+                dtype=object,
+            )
+
+            for band_name in self.ppc_band_names:
+                mat = self.ppc_matrix(band_name, dtype=np.float32)
+                values = mat[ii, jj].astype(np.float32, copy=False)
+
+                band_df = pd.DataFrame(
                     {
                         "band": band_name,
-                        "seed": seed,
-                        "target": target,
-                        "edge": _canonical_edge_key(seed, target),
-                        "value": float(mat[i, j]),
+                        "seed": seed_arr,
+                        "target": target_arr,
+                        "edge": edge_arr,
+                        "value": values,
                     }
                 )
+                rows.append(band_df)
 
-        return pd.DataFrame(rows)
+            if not rows:
+                self._ppc_edge_dataframe_cache = pd.DataFrame(
+                    columns=["band", "seed", "target", "edge", "value"]
+                )
+            else:
+                self._ppc_edge_dataframe_cache = pd.concat(rows, ignore_index=True)
 
+        return self._ppc_edge_dataframe_cache
 
 
 from dataclasses import dataclass
@@ -146,28 +189,47 @@ from sklearn.model_selection import train_test_split
 
 from features.results import FeatureExtractionResult, PSDBandExtractionResult, PPCBandExtractionResult
 
+
+from typing import TYPE_CHECKING, Iterable, Sequence
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+from participants.groups import HealthState
+from utils.enum import EnumParser
+
+if TYPE_CHECKING:
+    from features.dataset import FeaturesDataset
+    from features.dataset import SingleParticipantProcessedFeatureDataset
+
+
 class SampleSelector:
     """
     Helper orienté sélection / filtrage / projection ML pour manipuler
     un `FeaturesDataset`.
 
-    Responsabilités
-    ---------------
-    Cette classe gère :
-    - la sélection de features
-    - le filtrage de sujets
-    - le filtrage métier (ex. health state)
-    - les splits train / test
-    - la construction de X / y pour sklearn
+    Philosophie
+    -----------
+    - `FeaturesDataset` stocke et expose les vues tabulaires globales.
+    - `SampleSelector` gère la logique métier de sélection, filtrage, split,
+      et construction de X / y pour le machine learning.
+    - Le selector évite autant que possible les recalculs et s'appuie sur
+      les vues déjà cachées dans `FeaturesDataset`.
 
-    Elle ne gère pas la logique d'affichage / représentation tabulaire :
-    celle-ci reste dans `FeaturesDataset`.
+    Notes de performance
+    --------------------
+    - On exploite `dataset.wide_dataframe` et `dataset.subject_dataframe`
+      déjà cachés côté dataset.
+    - On évite les `copy()` tant qu'aucune modification n'est nécessaire.
+    - Les colonnes ML sont déterminées par filtrage de noms, sans reconstruire
+      les données sous-jacentes.
     """
 
     TARGET_COLUMN = "subject_health"
 
     SUBJECT_METADATA_COLUMNS = [
         "subject_id",
+        "subject_tag",
         "subject_health",
         "subject_group",
         "subject_gender",
@@ -176,7 +238,6 @@ class SampleSelector:
     ]
 
     CONNECTIVITY_PREFIX = "cn_"
-    EXCLUDED_CONNECTIVITY_FEATURES = {"cn_full"}
 
     def __init__(self, dataset: "FeaturesDataset"):
         self.dataset = dataset
@@ -188,7 +249,7 @@ class SampleSelector:
     @property
     def scalar_feature_names(self) -> list[str]:
         """
-        Noms des features scalaires disponibles.
+        Noms des familles de features scalaires disponibles.
         """
         return list(self.dataset.scalar_feature_names)
 
@@ -196,7 +257,6 @@ class SampleSelector:
     def connectivity_feature_names(self) -> list[str]:
         """
         Noms des familles de features de connectivité disponibles.
-
         Exemple :
         - cn_delta
         - cn_theta
@@ -208,7 +268,7 @@ class SampleSelector:
     @property
     def selectable_feature_names(self) -> list[str]:
         """
-        Ensemble des noms acceptés par `.select(...)`.
+        Ensemble des noms de features acceptés par `.select(...)`.
         """
         return self.scalar_feature_names + self.connectivity_feature_names
 
@@ -216,32 +276,59 @@ class SampleSelector:
     def n_subjects(self) -> int:
         return len(self.dataset.participant_datasets)
 
+    @property
+    def n_features(self) -> int:
+        """
+        Nombre de colonnes de X sans métadonnées.
+        """
+        return self.X().shape[1]
+
     # ==========================================================================
     # Helpers internes
     # ==========================================================================
 
     @staticmethod
     def _ensure_non_empty_list(values: Iterable[str], *, name: str) -> list[str]:
+        """
+        Convertit un itérable en liste et vérifie qu'il n'est pas vide.
+        """
         result = list(values)
         if not result:
             raise ValueError(f"{name} cannot be empty.")
         return result
 
     def _clone_with_dataset(self, dataset: "FeaturesDataset") -> "SampleSelector":
+        """
+        Construit un nouveau selector sur un sous-dataset.
+        """
         return SampleSelector(dataset)
 
     @classmethod
     def _is_connectivity_feature_name(cls, feature_name: str) -> bool:
-        return feature_name.startswith(cls.CONNECTIVITY_PREFIX)
+        """
+        Détermine si un nom de feature correspond à une famille de connectivité.
+        """
+        return str(feature_name).startswith(cls.CONNECTIVITY_PREFIX)
+
+    @classmethod
+    def _connectivity_feature_to_band_name(cls, feature_name: str) -> str:
+        """
+        Convertit :
+        - cn_delta -> delta
+        - cn_alpha -> alpha
+        """
+        if not cls._is_connectivity_feature_name(feature_name):
+            raise ValueError(f"'{feature_name}' is not a connectivity feature name.")
+        return feature_name[len(cls.CONNECTIVITY_PREFIX):]
 
     def _split_requested_features(
         self,
         features: Sequence[str],
     ) -> tuple[list[str], list[str]]:
         """
-        Sépare les features demandées en :
+        Sépare les features demandées en deux groupes :
         - features scalaires
-        - features de connectivité
+        - familles de connectivité
         """
         requested = self._ensure_non_empty_list(features, name="features")
 
@@ -255,15 +342,6 @@ class SampleSelector:
                 scalar_features.append(feature)
 
         return scalar_features, connectivity_features
-
-    @classmethod
-    def _connectivity_feature_to_band_name(cls, feature_name: str) -> str:
-        """
-        Convertit 'cn_delta' -> 'delta'
-        """
-        if not cls._is_connectivity_feature_name(feature_name):
-            raise ValueError(f"'{feature_name}' is not a connectivity feature name.")
-        return feature_name[len(cls.CONNECTIVITY_PREFIX):]
 
     def _validate_requested_features(
         self,
@@ -296,9 +374,19 @@ class SampleSelector:
         include_connectivity_features: Sequence[str] | None = None,
     ) -> list[str]:
         """
-        Calcule les colonnes wide à conserver dans X.
+        Détermine les colonnes de features à conserver dans la vue wide.
+
+        Convention de nommage supposée
+        ------------------------------
+        - Features scalaires : <channel>_<feature>
+          exemple : Fp1_entropy, Cz_theta_beta_ratio
+        - Connectivité : cn_<band>_<seed>_<target>
+          exemple : cn_delta_Fp1_Fp2
+
+        Cette méthode ne reconstruit aucune donnée :
+        elle filtre simplement les noms de colonnes déjà présents.
         """
-        wide_columns = list(self.dataset.to_wide_dataframe().columns)
+        wide_columns = self.dataset.wide_dataframe.columns
 
         scalar_features = (
             list(include_scalar_features)
@@ -312,22 +400,22 @@ class SampleSelector:
         )
 
         scalar_feature_columns: list[str] = []
-        scalar_suffixes = tuple(f"_{feature}" for feature in scalar_features)
+        if scalar_features:
+            scalar_suffixes = tuple(f"_{feature}" for feature in scalar_features)
+            scalar_feature_columns = [
+                col
+                for col in wide_columns
+                if col not in self.SUBJECT_METADATA_COLUMNS and col.endswith(scalar_suffixes)
+            ]
 
         connectivity_feature_columns: list[str] = []
-        connectivity_prefixes = tuple(f"{feature}_" for feature in connectivity_features)
-
-        for col in wide_columns:
-            if col in self.SUBJECT_METADATA_COLUMNS:
-                continue
-
-            if scalar_suffixes and col.endswith(scalar_suffixes):
-                scalar_feature_columns.append(col)
-                continue
-
-            if connectivity_prefixes and col.startswith(connectivity_prefixes):
-                connectivity_feature_columns.append(col)
-                continue
+        if connectivity_features:
+            connectivity_prefixes = tuple(f"{feature}_" for feature in connectivity_features)
+            connectivity_feature_columns = [
+                col
+                for col in wide_columns
+                if col not in self.SUBJECT_METADATA_COLUMNS and col.startswith(connectivity_prefixes)
+            ]
 
         return scalar_feature_columns + connectivity_feature_columns
 
@@ -343,7 +431,15 @@ class SampleSelector:
         `features` peut contenir un mélange de :
         - features scalaires : "theta_beta_ratio", "entropy", ...
         - connectivité      : "cn_delta", "cn_beta", ...
+
+        Notes
+        -----
+        - Les métadonnées sujet sont conservées.
+        - Les résultats PSD sont conservés tels quels.
+        - Les bandes PPC inutiles sont supprimées.
         """
+        from features.dataset import FeaturesDataset, SingleParticipantProcessedFeatureDataset
+
         scalar_features, connectivity_features = self._split_requested_features(features)
         self._validate_requested_features(scalar_features, connectivity_features)
 
@@ -390,7 +486,7 @@ class SampleSelector:
 
     def drop(self, features: Sequence[str]) -> "FeaturesDataset":
         """
-        Supprime certaines features du dataset courant.
+        Supprime certaines familles de features du dataset courant.
         """
         features_to_drop = set(self._ensure_non_empty_list(features, name="features"))
 
@@ -422,6 +518,8 @@ class SampleSelector:
         """
         Retourne un nouveau `FeaturesDataset` limité aux sujets demandés.
         """
+        from features.dataset import FeaturesDataset
+
         subject_ids_list = self._ensure_non_empty_list(subject_ids, name="subject_ids")
         subject_ids_set = set(subject_ids_list)
 
@@ -446,6 +544,8 @@ class SampleSelector:
         """
         Filtre le dataset sur un ou plusieurs health states.
         """
+        from features.dataset import FeaturesDataset
+
         parsed_healthstates = [
             EnumParser.parse(healthstate, HealthState).value
             for healthstate in healthstates
@@ -473,287 +573,13 @@ class SampleSelector:
         """
         return self._clone_with_dataset(self.filter_by_healthstate(healthstates))
 
-    # ==========================================================================
-    # Split train / test
-    # ==========================================================================
-
-    def split_train_test(
-        self,
-        *,
-        test_size: float = 0.2,
-        random_state: int | None = 42,
-        stratify: bool = True,
-        shuffle: bool = True,
-    ) -> tuple["FeaturesDataset", "FeaturesDataset"]:
-        """
-        Découpe le dataset en train / test au niveau sujet.
-        """
-        subject_df = self.dataset.to_subject_dataframe().copy()
-
-        if len(subject_df) < 2:
-            raise ValueError("At least 2 subjects are required to split the dataset.")
-
-        stratify_values = subject_df[self.TARGET_COLUMN] if stratify else None
-
-        train_ids, test_ids = train_test_split(
-            subject_df["subject_id"],
-            test_size=test_size,
-            random_state=random_state,
-            shuffle=shuffle,
-            stratify=stratify_values,
-        )
-
-        train_dataset = self.select_subject_ids(train_ids.tolist())
-        test_dataset = self.select_subject_ids(test_ids.tolist())
-
-        return train_dataset, test_dataset
-
-    def split_train_test_selectors(
-        self,
-        *,
-        test_size: float = 0.2,
-        random_state: int | None = 42,
-        stratify: bool = True,
-        shuffle: bool = True,
-    ) -> tuple["SampleSelector", "SampleSelector"]:
-        """
-        Variante renvoyant directement deux `SampleSelector`.
-        """
-        train_dataset, test_dataset = self.split_train_test(
-            test_size=test_size,
-            random_state=random_state,
-            stratify=stratify,
-            shuffle=shuffle,
-        )
-        return SampleSelector(train_dataset), SampleSelector(test_dataset)
-
-    def train_test_Xy(
-        self,
-        *,
-        test_size: float = 0.2,
-        random_state: int | None = 42,
-        stratify: bool = True,
-        shuffle: bool = True,
-        include_metadata: bool = False,
-        metadata_columns: Sequence[str] | None = None,
-        drop_columns: Sequence[str] | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-        """
-        Retourne directement :
-        X_train, X_test, y_train, y_test
-        """
-        train_selector, test_selector = self.split_train_test_selectors(
-            test_size=test_size,
-            random_state=random_state,
-            stratify=stratify,
-            shuffle=shuffle,
-        )
-
-        X_train = train_selector.X(
-            include_metadata=include_metadata,
-            metadata_columns=metadata_columns,
-            drop_columns=drop_columns,
-        )
-        y_train = train_selector.y()
-
-        X_test = test_selector.X(
-            include_metadata=include_metadata,
-            metadata_columns=metadata_columns,
-            drop_columns=drop_columns,
-        )
-        y_test = test_selector.y()
-
-        return X_train, X_test, y_train, y_test
-
-    # ==========================================================================
-    # Projection ML
-    # ==========================================================================
-
-    def X(
-        self,
-        *,
-        include_metadata: bool = False,
-        metadata_columns: Sequence[str] | None = None,
-        include_scalar_features: Sequence[str] | None = None,
-        include_connectivity_features: Sequence[str] | None = None,
-        drop_columns: Sequence[str] | None = None,
-    ) -> pd.DataFrame:
-        """
-        Construit la matrice X compatible scikit-learn.
-        """
-        df = self.dataset.to_wide_dataframe().copy()
-
-        if include_scalar_features is not None:
-            unknown_scalar = sorted(set(include_scalar_features) - set(self.scalar_feature_names))
-            if unknown_scalar:
-                raise KeyError(
-                    f"Unknown scalar features: {unknown_scalar}. "
-                    f"Available scalar features: {self.scalar_feature_names}"
-                )
-
-        if include_connectivity_features is not None:
-            unknown_connectivity = sorted(
-                set(include_connectivity_features) - set(self.connectivity_feature_names)
-            )
-            if unknown_connectivity:
-                raise KeyError(
-                    f"Unknown connectivity features: {unknown_connectivity}. "
-                    f"Available connectivity features: {self.connectivity_feature_names}"
-                )
-
-        feature_columns = self._wide_feature_columns(
-            include_scalar_features=include_scalar_features,
-            include_connectivity_features=include_connectivity_features,
-        )
-
-        X = df.loc[:, feature_columns].copy()
-
-        if include_metadata:
-            if metadata_columns is None:
-                kept_metadata = [
-                    col for col in self.SUBJECT_METADATA_COLUMNS
-                    if col != self.TARGET_COLUMN and col in df.columns
-                ]
-            else:
-                kept_metadata = [
-                    col for col in metadata_columns
-                    if col != self.TARGET_COLUMN and col in df.columns
-                ]
-
-            if kept_metadata:
-                X = pd.concat([df.loc[:, kept_metadata].copy(), X], axis=1)
-
-        if drop_columns is not None:
-            X = X.drop(columns=list(drop_columns), errors="ignore")
-
-        return X
-
-    def y(self) -> pd.Series:
-        """
-        Retourne la cible à prédire.
-        """
-        df = self.dataset.to_wide_dataframe()
-        if self.TARGET_COLUMN not in df.columns:
-            raise KeyError(
-                f"Target column '{self.TARGET_COLUMN}' not found in wide dataframe."
-            )
-        return df[self.TARGET_COLUMN].copy()
-
-    def Xy(
-        self,
-        *,
-        include_metadata: bool = False,
-        metadata_columns: Sequence[str] | None = None,
-        include_scalar_features: Sequence[str] | None = None,
-        include_connectivity_features: Sequence[str] | None = None,
-        drop_columns: Sequence[str] | None = None,
-    ) -> tuple[pd.DataFrame, pd.Series]:
-        """
-        Retourne directement `(X, y)`.
-        """
-        X = self.X(
-            include_metadata=include_metadata,
-            metadata_columns=metadata_columns,
-            include_scalar_features=include_scalar_features,
-            include_connectivity_features=include_connectivity_features,
-            drop_columns=drop_columns,
-        )
-        y = self.y()
-        return X, y
-
-    def feature_matrix(
-        self,
-        *,
-        include_metadata: bool = False,
-        metadata_columns: Sequence[str] | None = None,
-        include_scalar_features: Sequence[str] | None = None,
-        include_connectivity_features: Sequence[str] | None = None,
-        drop_columns: Sequence[str] | None = None,
-    ) -> pd.DataFrame:
-        return self.X(
-            include_metadata=include_metadata,
-            metadata_columns=metadata_columns,
-            include_scalar_features=include_scalar_features,
-            include_connectivity_features=include_connectivity_features,
-            drop_columns=drop_columns,
-        )
-
-    def target(self) -> pd.Series:
-        return self.y()
-
-    def y_encoded(self, mapping: dict[str, int] | None = None) -> pd.Series:
-        """
-        Retourne une version encodée numériquement de la cible.
-        """
-        y = self.y()
-
-        if mapping is None:
-            classes = sorted(y.dropna().unique().tolist())
-            mapping = {label: i for i, label in enumerate(classes)}
-
-        encoded = y.map(mapping)
-
-        if encoded.isna().any():
-            unknown_labels = sorted(y[encoded.isna()].unique().tolist())
-            raise ValueError(
-                f"Some labels could not be encoded with mapping={mapping}. "
-                f"Unknown labels: {unknown_labels}"
-            )
-
-        return encoded
-
-    # ==========================================================================
-    # Inspection / validation
-    # ==========================================================================
-
-    @property
-    def n_features(self) -> int:
-        return self.X().shape[1]
-
-    def class_distribution(self) -> pd.Series:
-        return self.y().value_counts(dropna=False)
-
-    def summary(self) -> dict[str, object]:
-        X = self.X()
-        y = self.y()
-
-        return {
-            "n_subjects": len(y),
-            "n_features": X.shape[1],
-            "n_scalar_feature_families": len(self.scalar_feature_names),
-            "n_connectivity_feature_families": len(self.connectivity_feature_names),
-            "target_name": self.TARGET_COLUMN,
-            "classes": sorted(y.dropna().unique().tolist()),
-            "class_distribution": y.value_counts(dropna=False).to_dict(),
-        }
-
-    def assert_ml_ready(self) -> None:
-        X, y = self.Xy()
-
-        if X.empty:
-            raise ValueError("X is empty.")
-
-        if y.empty:
-            raise ValueError("y is empty.")
-
-        if y.nunique(dropna=True) < 2:
-            raise ValueError("At least two target classes are required.")
-
-        if X.isna().any().any():
-            nan_cols = X.columns[X.isna().any()].tolist()
-            raise ValueError(
-                f"X contains NaN values. Problematic columns include: {nan_cols[:10]}"
-            )
-
-        if y.isna().any():
-            raise ValueError("y contains NaN values.")
-
-
+    
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from functools import cached_property
 
 
 
@@ -762,26 +588,23 @@ from typing import Any
 import pandas as pd
 
 
+
+from functools import cached_property
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from utils.dataframe import DataframeHelpers
+
+
 class FeaturesDataset:
-    """
-    Conteneur global regroupant tous les sujets d'une cohorte.
-
-    Responsabilités
-    ---------------
-    Cette classe :
-    - stocke les participant datasets
-    - expose des vues tabulaires / représentations des données
-    - expose quelques métadonnées globales
-
-    Elle ne gère pas la logique de filtrage / split / sélection métier :
-    cela est délégué à `SampleSelector`.
-    """
-
     CONNECTIVITY_PREFIX = "cn_"
     EXCLUDED_CONNECTIVITY_BANDS = {"full"}
 
     SUBJECT_METADATA_COLUMNS = [
         "subject_id",
+        #"subject_tag",
         "subject_health",
         "subject_group",
         "subject_gender",
@@ -794,10 +617,6 @@ class FeaturesDataset:
             raise ValueError("participant_datasets cannot be empty.")
         self.participant_datasets = participant_datasets
 
-    # -------------------------------------------------------------------------
-    # Métadonnées globales
-    # -------------------------------------------------------------------------
-
     @property
     def subjects(self):
         return [dataset.subject for dataset in self.participant_datasets]
@@ -808,9 +627,6 @@ class FeaturesDataset:
 
     @property
     def scalar_feature_names(self) -> list[str]:
-        """
-        Noms des features scalaires natives présentes dans `features_df`.
-        """
         return self.participant_datasets[0].feature_names
 
     @property
@@ -823,10 +639,6 @@ class FeaturesDataset:
 
     @property
     def connectivity_band_names(self) -> list[str]:
-        """
-        Bandes PPC exposées comme familles de connectivité.
-        La bande 'full' est exclue.
-        """
         return [
             band
             for band in self.ppc_band_names
@@ -835,25 +647,10 @@ class FeaturesDataset:
 
     @property
     def connectivity_feature_names(self) -> list[str]:
-        """
-        Noms des pseudo-features de connectivité :
-        - cn_delta
-        - cn_theta
-        - cn_alpha
-        - ...
-        """
-        return [
-            f"{self.CONNECTIVITY_PREFIX}{band}"
-            for band in self.connectivity_band_names
-        ]
+        return [f"{self.CONNECTIVITY_PREFIX}{band}" for band in self.connectivity_band_names]
 
     @property
     def feature_names(self) -> list[str]:
-        """
-        Ensemble des features de haut niveau sélectionnables :
-        - features scalaires
-        - familles de connectivité
-        """
         return self.scalar_feature_names + self.connectivity_feature_names
 
     @property
@@ -875,10 +672,8 @@ class FeaturesDataset:
     @property
     def selector(self) -> "SampleSelector":
         return SampleSelector(self)
-
-    # -------------------------------------------------------------------------
-    # Accès participant
-    # -------------------------------------------------------------------------
+    
+   
 
     def participant_dataset(self, participant_id: str) -> "SingleParticipantProcessedFeatureDataset":
         for dataset in self.participant_datasets:
@@ -886,19 +681,120 @@ class FeaturesDataset:
                 return dataset
         raise KeyError(f"No participant dataset found for id='{participant_id}'.")
 
-    # -------------------------------------------------------------------------
-    # Vues longues
-    # -------------------------------------------------------------------------
+    @staticmethod
+    def _edge_to_column_suffix(seed: str, target: str) -> str:
+        return f"{seed}_{target}"
 
-    def to_long_dataframe(self) -> pd.DataFrame:
-        """
-        Vue longue des features scalaires.
+    @cached_property
+    def _scalar_value_columns(self) -> list[str]:
+        first = self.participant_datasets[0].features_df
+        return [f"{ch}_{feat}" for ch in first.index for feat in first.columns]
 
-        Colonnes :
-        subject_id, subject_age, subject_mmse, subject_health,
-        subject_group, subject_gender,
-        channel, feature, value
+    @cached_property
+    def _connectivity_value_columns(self) -> list[str]:
+        first = self.participant_datasets[0]
+        ii, jj = first.ppc_upper_triangle_indices
+        ch_names = first.ch_names
+
+        cols = []
+        for band in self.connectivity_band_names:
+            for i, j in zip(ii.tolist(), jj.tolist()):
+                cols.append(f"{self.CONNECTIVITY_PREFIX}{band}_{ch_names[i]}_{ch_names[j]}")
+        return cols
+
+    @cached_property
+    def subject_dataframe(self) -> pd.DataFrame:
+        rows = []
+        for participant_dataset in self.participant_datasets:
+            subject = participant_dataset.subject
+            rows.append(
+                {
+                    "subject_id": subject.id,
+                    #"subject_tag": subject.tag,
+                    "subject_health": subject.health_state,
+                    "subject_group": subject.group,
+                    "subject_gender": subject.gender,
+                    "subject_age": subject.age,
+                    "subject_mmse": subject.mmse,
+                }
+            )
+
+        df = pd.DataFrame(rows)
+
+        # Réduction mémoire utile pour colonnes répétitives
+        for col in ["subject_tag", "subject_health", "subject_group", "subject_gender"]:
+            if col in df.columns:
+                df[col] = df[col].astype("category")
+
+        return df
+
+    @cached_property
+    def wide_scalar_dataframe(self) -> pd.DataFrame:
         """
+        Vue wide sujet-level des features scalaires uniquement.
+        Construction vectorisée.
+        """
+        data = np.vstack([
+            ds.features_df.to_numpy(dtype=np.float32, copy=False).ravel(order="C")
+            for ds in self.participant_datasets
+        ])
+
+        values_df = pd.DataFrame(data, columns=self._scalar_value_columns)
+        return pd.concat(
+            [self.subject_dataframe.reset_index(drop=True), values_df.reset_index(drop=True)],
+            axis=1,
+        )
+
+    @cached_property
+    def wide_connectivity_dataframe(self) -> pd.DataFrame:
+        """
+        Vue wide sujet-level de la connectivité PPC.
+        Construction vectorisée sur triangle supérieur.
+        """
+        first = self.participant_datasets[0]
+        ii, jj = first.ppc_upper_triangle_indices
+
+        rows = []
+        for ds in self.participant_datasets:
+            row_arrays = []
+            for band in self.connectivity_band_names:
+                mat = ds.ppc_matrix(band, dtype=np.float32)
+                row_arrays.append(mat[ii, jj])
+            if row_arrays:
+                rows.append(np.concatenate(row_arrays, axis=0))
+            else:
+                rows.append(np.empty((0,), dtype=np.float32))
+
+        data = np.vstack(rows) if rows else np.empty((0, 0), dtype=np.float32)
+        values_df = pd.DataFrame(data, columns=self._connectivity_value_columns)
+
+        return pd.concat(
+            [self.subject_dataframe.reset_index(drop=True), values_df.reset_index(drop=True)],
+            axis=1,
+        )
+
+    @cached_property
+    def wide_dataframe(self) -> pd.DataFrame:
+        """
+        Vue wide complète.
+
+        Important :
+        - pas de merge
+        - concat direct car l'ordre des sujets est identique
+        """
+        scalar_only = self.wide_scalar_dataframe
+        conn_only = self.wide_connectivity_dataframe.drop(
+            columns=self.SUBJECT_METADATA_COLUMNS,
+            errors="ignore",
+        )
+
+        return pd.concat(
+            [scalar_only.reset_index(drop=True), conn_only.reset_index(drop=True)],
+            axis=1,
+        )
+
+    @cached_property
+    def long_dataframe(self) -> pd.DataFrame:
         rows: list[pd.DataFrame] = []
 
         for participant_dataset in self.participant_datasets:
@@ -912,6 +808,7 @@ class FeaturesDataset:
             )
 
             df_long["subject_id"] = subject.id
+            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -920,17 +817,12 @@ class FeaturesDataset:
 
             rows.append(df_long)
 
-        return pd.concat(rows, ignore_index=True)
+        df = pd.concat(rows, ignore_index=True)
+        df["value"] = df["value"].astype(np.float32, copy=False)
+        return df
 
-    def to_long_psd_dataframe(self) -> pd.DataFrame:
-        """
-        Vue longue des résultats PSD agrégés par bande.
-
-        Colonnes :
-        subject_id, subject_age, subject_mmse, subject_health,
-        subject_group, subject_gender,
-        channel, band, value
-        """
+    @cached_property
+    def long_psd_dataframe(self) -> pd.DataFrame:
         rows: list[pd.DataFrame] = []
 
         for participant_dataset in self.participant_datasets:
@@ -944,6 +836,7 @@ class FeaturesDataset:
             )
 
             df_long["subject_id"] = subject.id
+            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -952,24 +845,20 @@ class FeaturesDataset:
 
             rows.append(df_long)
 
-        return pd.concat(rows, ignore_index=True)
+        df = pd.concat(rows, ignore_index=True)
+        df["value"] = df["value"].astype(np.float32, copy=False)
+        return df
 
-    def to_long_ppc_dataframe(self) -> pd.DataFrame:
-        """
-        Vue longue des résultats PPC par bande et par arête.
-
-        Colonnes :
-        subject_id, subject_age, subject_mmse, subject_health,
-        subject_group, subject_gender,
-        band, seed, target, edge, value
-        """
+    @cached_property
+    def long_ppc_dataframe(self) -> pd.DataFrame:
         rows: list[pd.DataFrame] = []
 
         for participant_dataset in self.participant_datasets:
             subject = participant_dataset.subject
-            df_long = participant_dataset.to_ppc_edge_dataframe().copy()
+            df_long = participant_dataset.ppc_edge_dataframe.copy()
 
             df_long["subject_id"] = subject.id
+            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -980,192 +869,69 @@ class FeaturesDataset:
 
         return pd.concat(rows, ignore_index=True)
 
-    def to_long_connectivity_dataframe(self) -> pd.DataFrame:
-        """
-        Vue longue de la connectivité avec convention de nommage orientée
-        feature de haut niveau.
-
-        Colonnes :
-        subject_id, subject_age, subject_mmse, subject_health,
-        subject_group, subject_gender,
-        connectivity_feature, band, seed, target, edge, value
-        """
-        df = self.to_long_ppc_dataframe().copy()
+    @cached_property
+    def long_connectivity_dataframe(self) -> pd.DataFrame:
+        df = self.long_ppc_dataframe
         df = df.loc[~df["band"].isin(self.EXCLUDED_CONNECTIVITY_BANDS)].copy()
         df["connectivity_feature"] = self.CONNECTIVITY_PREFIX + df["band"].astype(str)
         return df
 
-    # -------------------------------------------------------------------------
-    # Vues wide
-    # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _edge_to_column_suffix(seed: str, target: str) -> str:
-        """
-        Convertit une arête en suffixe stable de colonne.
-
-        Exemple :
-        Fp1, Fp2 -> Fp1_Fp2
-        """
-        return f"{seed}_{target}"
-
-    def to_wide_scalar_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide sujet-level des features scalaires uniquement.
-
-        Colonnes :
-        - métadonnées sujet
-        - <channel>_<feature>
-        """
-        rows = []
-
-        for participant_dataset in self.participant_datasets:
-            subject = participant_dataset.subject
-            features_df = participant_dataset.features_df
-
-            row = {
-                "subject_id": subject.id,
-                "subject_health": subject.health_state,
-                "subject_group": subject.group,
-                "subject_gender": subject.gender,
-                "subject_mmse": subject.mmse,
-                "subject_age": subject.age,
-            }
-
-            for channel in features_df.index:
-                for feature in features_df.columns:
-                    row[f"{channel}_{feature}"] = float(features_df.loc[channel, feature])
-
-            rows.append(row)
-
-        return pd.DataFrame(rows)
-
-    def to_wide_connectivity_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide sujet-level de la connectivité PPC.
-
-        Colonnes :
-        - métadonnées sujet
-        - cn_<band>_<seed>_<target>
-
-        Exemple :
-        - cn_delta_Fp1_Fp2
-        - cn_alpha_C3_Pz
-
-        La bande 'full' est exclue.
-        """
-        rows = []
-
-        for participant_dataset in self.participant_datasets:
-            subject = participant_dataset.subject
-
-            row = {
-                "subject_id": subject.id,
-                "subject_health": subject.health_state,
-                "subject_group": subject.group,
-                "subject_gender": subject.gender,
-                "subject_mmse": subject.mmse,
-                "subject_age": subject.age,
-            }
-
-            df_ppc = participant_dataset.to_ppc_edge_dataframe()
-
-            if not df_ppc.empty:
-                df_ppc = df_ppc.loc[
-                    ~df_ppc["band"].isin(self.EXCLUDED_CONNECTIVITY_BANDS)
-                ].copy()
-
-                for record in df_ppc.itertuples(index=False):
-                    col_name = (
-                        f"{self.CONNECTIVITY_PREFIX}"
-                        f"{record.band}_"
-                        f"{self._edge_to_column_suffix(record.seed, record.target)}"
-                    )
-                    row[col_name] = float(record.value)
-
-            rows.append(row)
-
-        return pd.DataFrame(rows)
-
-    def to_wide_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide sujet-level complète.
-
-        Colonnes :
-        - métadonnées sujet
-        - features scalaires      : <channel>_<feature>
-        - connectivité PPC        : cn_<band>_<seed>_<target>
-        """
-        scalar_df = self.to_wide_scalar_dataframe()
-        connectivity_df = self.to_wide_connectivity_dataframe()
-
-        return scalar_df.merge(
-            connectivity_df,
-            on=self.SUBJECT_METADATA_COLUMNS,
-            how="outer",
-        )
-
-    # -------------------------------------------------------------------------
-    # Vue sujet-level
-    # -------------------------------------------------------------------------
-
-    def to_subject_dataframe(self) -> pd.DataFrame:
-        """
-        Vue sujet-level minimale.
-        """
-        rows = []
-        for participant_dataset in self.participant_datasets:
-            subject = participant_dataset.subject
-            rows.append(
-                {
-                    "subject_id": subject.id,
-                    "subject_health": subject.health_state,
-                    "subject_group": subject.group,
-                    "subject_gender": subject.gender,
-                    "subject_age": subject.age,
-                    "subject_mmse": subject.mmse,
-                }
-            )
-        return pd.DataFrame(rows)
-
-    # -------------------------------------------------------------------------
-    # Résumés agrégés
-    # -------------------------------------------------------------------------
-
-    @property
+    @cached_property
     def mean_feature_df(self) -> pd.DataFrame:
         return DataframeHelpers.mean(
             [dataset.features_df for dataset in self.participant_datasets]
         )
 
-    @property
+    @cached_property
     def mean_psd_df(self) -> pd.DataFrame:
         return DataframeHelpers.mean(
             [dataset.to_psd_dataframe() for dataset in self.participant_datasets]
         )
 
+    @cached_property
+    def all_feature_names(self):
+        return list(self.wide_dataframe.columns)
+    
+    @cached_property
+    def groups(self):
+        return self.wide_dataframe["subject_id"]
+    
+    @cached_property
+    def y(self):
+        return self.wide_dataframe["subject_health"]
+
+               
+    
+class SelectedFeaturesDataset(FeaturesDataset):
+    def __init__(self, participant_datasets, selected_feature_names:list[str]):
+        super().__init__(participant_datasets)
+        self.selected_features = selected_feature_names
+
+    @cached_property
+    def X(self):
+        return self.wide_dataframe[self.selected_features]
+    
+
+class FeaturesDatasetSelector:
+    @staticmethod
+    def select(dataset:FeaturesDataset, selection:list[str]):
+        return SelectedFeaturesDataset(participant_datasets=dataset.participant_datasets, selected_feature_names=selection)
+
+    
+        
 
 from features.factory import CompleteFeatureExtractionResult
+from features.results import (
+    FeatureExtractionResult,
+    PSDBandExtractionResult,
+    PPCBandExtractionResult,
+)
+
+
 class SingleParticipantProcessedFeatureDatasetFactory:
-    """
-    Factory pour construire un SingleParticipantProcessedFeatureDataset
-    à partir des objets de résultats d'extraction.
-
-    Cette factory centralise :
-    - la conversion des résultats features -> DataFrame
-    - la conversion des résultats PSD -> dict sérialisable
-    - la conversion des résultats PPC -> dict sérialisable
-    - l'emballage des métadonnées sujet / pipeline / EEG info
-
-    Point important
-    ---------------
-    On utilise désormais le snapshot `eeg_info_dico` déjà capturé au moment
-    de l'extraction, afin de ne jamais dépendre d'un `Raw` encore chargé.
-    """
-
     @staticmethod
     def build(
-        complete_extraction_result:CompleteFeatureExtractionResult
+        complete_extraction_result: CompleteFeatureExtractionResult,
     ) -> "SingleParticipantProcessedFeatureDataset":
         return SingleParticipantProcessedFeatureDataset(
             features_df=SingleParticipantProcessedFeatureDatasetFactory._build_features_df(
@@ -1177,7 +943,9 @@ class SingleParticipantProcessedFeatureDatasetFactory:
             ppc_band_results=SingleParticipantProcessedFeatureDatasetFactory._build_ppc_dict(
                 complete_extraction_result.ppc_result
             ),
-            subject_dico=dict(complete_extraction_result.feature_result.eeg.source.subject.to_dict()),
+            subject_dico=dict(
+                complete_extraction_result.feature_result.eeg.source.subject.to_dict()
+            ),
             pipeline_name=str(complete_extraction_result.feature_result.eeg.pipeline_name),
             eeg_info_dico=dict(complete_extraction_result.feature_result.eeg_info_dico),
         )
@@ -1186,40 +954,35 @@ class SingleParticipantProcessedFeatureDatasetFactory:
     def _build_features_df(feature_result: FeatureExtractionResult) -> pd.DataFrame:
         """
         Convertit le résultat d'extraction des features scalaires
-        en DataFrame [channels x features].
+        en DataFrame [channels x features], en float32 pour réduire la mémoire.
         """
         df = feature_result.dataframe.copy()
-
-        for col in df.columns:
-            df[col] = df[col].astype(float)
-
-        return df
+        return df.astype(np.float32, copy=False)
 
     @staticmethod
     def _build_psd_dict(
         psd_result: PSDBandExtractionResult,
     ) -> dict[str, dict[str, float]]:
         """
-        Convertit le résultat PSD en dictionnaire sérialisable.
+        Les dicts JSON restent en float Python.
         """
         result: dict[str, dict[str, float]] = {}
-
         for signal_name, band_dict in psd_result.dico.items():
             result[signal_name] = {
                 band_name: float(value)
                 for band_name, value in band_dict.items()
             }
-
         return result
 
     @staticmethod
     def _build_ppc_dict(
         ppc_result: PPCBandExtractionResult,
-    ) -> dict[str, list[list[float]]]:
+    ) -> dict[str, np.ndarray]:
         """
-        Convertit le résultat PPC en dictionnaire sérialisable JSON-friendly.
+        On garde des arrays numpy float32 en mémoire.
+        C'est bien plus compact et plus rapide que des listes imbriquées.
         """
         return {
-            band_name: ppc_result.matrix(band_name).tolist()
+            band_name: np.asarray(ppc_result.matrix(band_name), dtype=np.float32)
             for band_name in ppc_result.band_names
         }

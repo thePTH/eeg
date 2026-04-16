@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from features.dataset import SingleParticipantProcessedFeatureDataset, FeaturesDataset
@@ -25,14 +26,12 @@ class SingleParticipantProcessedFeatureDatasetIO:
 
         XX est automatiquement incrémenté selon les enregistrements déjà présents.
         """
-
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
         subject_id = dataset.subject_dico["id"]
         subject_prefix = f"sub-{subject_id}-rec-"
 
-        # Recherche des enregistrements existants
         existing_indices = []
 
         for folder in path.iterdir():
@@ -41,24 +40,26 @@ class SingleParticipantProcessedFeatureDatasetIO:
                 if suffix.isdigit():
                     existing_indices.append(int(suffix))
 
-        # Détermine le prochain index disponible
         next_index = 1 if not existing_indices else max(existing_indices) + 1
-
         recording_key = f"{next_index:02d}"
 
         export_folder = path / f"{subject_prefix}{recording_key}"
         export_folder.mkdir(parents=True, exist_ok=True)
 
-        # Sauvegarde features
+        # Features
         dataset.features_df.to_parquet(export_folder / "features.parquet")
 
-        # Sauvegarde PSD
+        # PSD
         with open(export_folder / "psd_band_results.json", "w") as f:
             json.dump(dataset.psd_band_results, f)
 
-        # Sauvegarde PPC
+        # PPC: conversion explicite ndarray -> list
+        ppc_json_ready = {
+            band_name: dataset.ppc_matrix(band_name).tolist()
+            for band_name in dataset.ppc_band_names
+        }
         with open(export_folder / "ppc_band_results.json", "w") as f:
-            json.dump(dataset.ppc_band_results, f)
+            json.dump(ppc_json_ready, f)
 
         metadata = {
             "subject_dico": dataset.subject_dico,
@@ -78,12 +79,19 @@ class SingleParticipantProcessedFeatureDatasetIO:
         path = Path(path)
 
         features_df = pd.read_parquet(path / "features.parquet")
+        features_df = features_df.astype(np.float32, copy=False)
 
         with open(path / "psd_band_results.json", "r") as f:
             psd_band_results = json.load(f)
 
         with open(path / "ppc_band_results.json", "r") as f:
-            ppc_band_results = json.load(f)
+            raw_ppc_band_results = json.load(f)
+
+        # Conversion list -> ndarray float32
+        ppc_band_results = {
+            band_name: np.asarray(matrix, dtype=np.float32)
+            for band_name, matrix in raw_ppc_band_results.items()
+        }
 
         with open(path / "metadata.json", "r") as f:
             metadata = json.load(f)
@@ -111,7 +119,7 @@ class FeaturesDatasetIO:
             )
 
     @staticmethod
-    def load(folder_name_path: str | Path):
+    def load(folder_name_path: str | Path) -> FeaturesDataset:
         participant_datasets = []
         folder = Path(folder_name_path)
 
