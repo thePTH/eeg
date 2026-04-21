@@ -8,9 +8,9 @@ from functools import cached_property
 
 class HyperparameterGrid:
     criterion:list[str]=["gini", "entropy"]
-    max_depth:list[int]=[6]
-    min_samples_split:list[int]=[4]
-    min_samples_leaf:list[int]=[1]
+    max_depth:list[int]=[5, 6, 7, 8, 10, 15, 20]
+    min_samples_split:list[int]=[2, 5, 10, 20]
+    min_samples_leaf:list[int]=[2, 5, 10, 20]
     
 
     def to_dict(self):

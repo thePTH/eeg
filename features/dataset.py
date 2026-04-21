@@ -514,12 +514,15 @@ class SampleSelector:
         """
         return self._clone_with_dataset(self.drop(features))
 
-    def select_subject_ids(self, subject_ids: Sequence[str]) -> "FeaturesDataset":
+    def select_subject_ids(self, subject_ids: Sequence[str]) -> "FeaturesDataset" | "SelectedFeaturesDataset":
         """
-        Retourne un nouveau `FeaturesDataset` limité aux sujets demandés.
-        """
-        from features.dataset import FeaturesDataset
+        Retourne un nouveau dataset limité aux sujets demandés.
 
+        Important
+        ---------
+        - Si le dataset courant est un `SelectedFeaturesDataset`,
+          les `selected_columns` sont conservées.
+        """
         subject_ids_list = self._ensure_non_empty_list(subject_ids, name="subject_ids")
         subject_ids_set = set(subject_ids_list)
 
@@ -532,7 +535,7 @@ class SampleSelector:
         if not new_participant_datasets:
             raise ValueError("No participant matched the requested subject_ids.")
 
-        return FeaturesDataset(new_participant_datasets)
+        return self._build_same_dataset_type(new_participant_datasets)
 
     def select_subject_ids_selector(self, subject_ids: Sequence[str]) -> "SampleSelector":
         """
@@ -563,6 +566,27 @@ class SampleSelector:
             )
 
         return FeaturesDataset(new_participant_datasets)
+    
+    def _build_same_dataset_type(
+        self,
+        participant_datasets: list["SingleParticipantProcessedFeatureDataset"],
+    ) -> "FeaturesDataset":
+        """
+        Reconstruit un dataset du même type que `self.dataset`.
+
+        - Si `self.dataset` est un `FeaturesDataset`, on retourne un `FeaturesDataset`
+        - Si `self.dataset` est un `SelectedFeaturesDataset`, on retourne un
+          `SelectedFeaturesDataset` avec les mêmes `selected_columns`
+        """
+        from features.dataset import FeaturesDataset, SelectedFeaturesDataset
+
+        if isinstance(self.dataset, SelectedFeaturesDataset):
+            return SelectedFeaturesDataset(
+                participant_datasets=participant_datasets,
+                selected_columns=list(self.dataset.selected_columns),
+            )
+
+        return FeaturesDataset(participant_datasets)
 
     def filter_by_healthstate_selector(
         self,
@@ -572,6 +596,127 @@ class SampleSelector:
         Variante chaînable de `.filter_by_healthstate(...)`.
         """
         return self._clone_with_dataset(self.filter_by_healthstate(healthstates))
+    
+    def group_train_test_split(
+        self,
+        group_column: str = "subject_id",
+        test_size: float = 0.2,
+        random_state: int | None = 42,
+        shuffle: bool = True,
+    ) -> tuple["FeaturesDataset", "FeaturesDataset"]:
+        """
+        Split le dataset par groupes et non par lignes.
+
+        Exemple typique
+        ----------------
+        - group_column = "subject_id"
+
+        Garantie
+        --------
+        Un même groupe n'apparaît jamais à la fois dans train et test.
+
+        Returns
+        -------
+        train_dataset, test_dataset
+        """
+        if group_column != "subject_id":
+            raise ValueError(
+                "For now, only group_column='subject_id' is supported in SampleSelector, "
+                f"got '{group_column}'."
+            )
+
+        subject_ids = [participant_dataset.subject.id for participant_dataset in self.dataset.participant_datasets]
+        subject_ids = list(dict.fromkeys(subject_ids))
+
+        if len(subject_ids) < 2:
+            raise ValueError("At least 2 groups are required to perform a train/test split.")
+
+        train_subject_ids, test_subject_ids = train_test_split(
+            subject_ids,
+            test_size=test_size,
+            random_state=random_state,
+            shuffle=shuffle,
+        )
+
+        train_dataset = self.select_subject_ids(train_subject_ids)
+        test_dataset = self.select_subject_ids(test_subject_ids)
+
+        return train_dataset, test_dataset
+
+    def group_train_val_test_split(
+        self,
+        group_column: str = "subject_id",
+        val_size: float = 0.2,
+        test_size: float = 0.2,
+        random_state: int | None = 42,
+        shuffle: bool = True,
+    ) -> tuple["FeaturesDataset", "FeaturesDataset", "FeaturesDataset"]:
+        """
+        Split le dataset par groupes en train / validation / test.
+
+        Exemple typique
+        ----------------
+        - group_column = "subject_id"
+
+        Interprétation des tailles
+        --------------------------
+        `val_size` et `test_size` sont exprimés relativement au dataset total.
+
+        Exemple :
+        - val_size = 0.2
+        - test_size = 0.2
+        => train = 0.6, val = 0.2, test = 0.2
+
+        Garantie
+        --------
+        Un même groupe n'apparaît jamais dans plusieurs sous-datasets.
+
+        Returns
+        -------
+        train_dataset, val_dataset, test_dataset
+        """
+        if group_column != "subject_id":
+            raise ValueError(
+                "For now, only group_column='subject_id' is supported in SampleSelector, "
+                f"got '{group_column}'."
+            )
+
+        if not (0 < val_size < 1):
+            raise ValueError("`val_size` must be in (0, 1).")
+
+        if not (0 < test_size < 1):
+            raise ValueError("`test_size` must be in (0, 1).")
+
+        if val_size + test_size >= 1:
+            raise ValueError("`val_size + test_size` must be strictly smaller than 1.")
+
+        subject_ids = [participant_dataset.subject.id for participant_dataset in self.dataset.participant_datasets]
+        subject_ids = list(dict.fromkeys(subject_ids))
+
+        if len(subject_ids) < 3:
+            raise ValueError("At least 3 groups are required to perform a train/val/test split.")
+
+        train_subject_ids, temp_subject_ids = train_test_split(
+            subject_ids,
+            test_size=(val_size + test_size),
+            random_state=random_state,
+            shuffle=shuffle,
+        )
+
+        relative_test_size = test_size / (val_size + test_size)
+
+        val_subject_ids, test_subject_ids = train_test_split(
+            temp_subject_ids,
+            test_size=relative_test_size,
+            random_state=random_state,
+            shuffle=shuffle,
+        )
+
+        train_dataset = self.select_subject_ids(train_subject_ids)
+        val_dataset = self.select_subject_ids(val_subject_ids)
+        test_dataset = self.select_subject_ids(test_subject_ids)
+
+        return train_dataset, val_dataset, test_dataset
 
     
 from typing import Any, Sequence
@@ -598,14 +743,40 @@ import pandas as pd
 from utils.dataframe import DataframeHelpers
 
 
+
+from functools import cached_property
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pandas as pd
+
+from utils.dataframe import DataframeHelpers
+
+if TYPE_CHECKING:
+    from features.dataset import SingleParticipantProcessedFeatureDataset
+    from features.dataset import SampleSelector
+
+
+
 class FeaturesDataset:
     CONNECTIVITY_PREFIX = "cn_"
     EXCLUDED_CONNECTIVITY_BANDS = {"full"}
 
     SUBJECT_METADATA_COLUMNS = [
         "subject_id",
-        #"subject_tag",
+        # "subject_tag",
         "subject_health",
+        "subject_group",
+        "subject_gender",
+        "subject_mmse",
+        "subject_age",
+    ]
+
+    # Colonnes sujet utilisables comme variables explicatives.
+    # On exclut volontairement :
+    # - subject_id     : identifiant, pas une vraie feature ML
+    # - subject_health : target
+    SUBJECT_FEATURE_COLUMNS = [
         "subject_group",
         "subject_gender",
         "subject_mmse",
@@ -625,8 +796,19 @@ class FeaturesDataset:
     def ch_names(self) -> list[str]:
         return self.participant_datasets[0].ch_names
 
+    # ==========================================================================
+    # Noms de familles de features (niveau métier)
+    # ==========================================================================
+
     @property
     def scalar_feature_names(self) -> list[str]:
+        """
+        Familles de features scalaires disponibles au niveau dataset.
+        Exemple :
+        - variance
+        - entropy
+        - theta_beta_ratio
+        """
         return self.participant_datasets[0].feature_names
 
     @property
@@ -647,11 +829,43 @@ class FeaturesDataset:
 
     @property
     def connectivity_feature_names(self) -> list[str]:
+        """
+        Familles de connectivité disponibles au niveau dataset.
+        Exemple :
+        - cn_delta
+        - cn_theta
+        - cn_alpha
+        """
         return [f"{self.CONNECTIVITY_PREFIX}{band}" for band in self.connectivity_band_names]
 
     @property
+    def subject_feature_names(self) -> list[str]:
+        """
+        Features sujet utilisables comme variables explicatives.
+        Exemple :
+        - subject_group
+        - subject_gender
+        - subject_mmse
+        - subject_age
+        """
+        return list(self.SUBJECT_FEATURE_COLUMNS)
+
+    @property
     def feature_names(self) -> list[str]:
-        return self.scalar_feature_names + self.connectivity_feature_names
+        """
+        Noms de familles de features disponibles pour la sélection métier.
+        """
+        return (
+            self.scalar_feature_names
+            + self.connectivity_feature_names
+            + self.subject_feature_names
+        )
+    
+
+
+    # ==========================================================================
+    # Métadonnées / vues globales
+    # ==========================================================================
 
     @property
     def ppc_edge_keys(self) -> list[str]:
@@ -659,7 +873,7 @@ class FeaturesDataset:
 
     @property
     def groups(self):
-        return set(subject.group for subject in self.subjects)
+        return self.wide_dataframe["subject_id"]
 
     @property
     def eeg_info(self):
@@ -672,8 +886,6 @@ class FeaturesDataset:
     @property
     def selector(self) -> "SampleSelector":
         return SampleSelector(self)
-    
-   
 
     def participant_dataset(self, participant_id: str) -> "SingleParticipantProcessedFeatureDataset":
         for dataset in self.participant_datasets:
@@ -710,7 +922,7 @@ class FeaturesDataset:
             rows.append(
                 {
                     "subject_id": subject.id,
-                    #"subject_tag": subject.tag,
+                    # "subject_tag": subject.tag,
                     "subject_health": subject.health_state,
                     "subject_group": subject.group,
                     "subject_gender": subject.gender,
@@ -721,7 +933,6 @@ class FeaturesDataset:
 
         df = pd.DataFrame(rows)
 
-        # Réduction mémoire utile pour colonnes répétitives
         for col in ["subject_tag", "subject_health", "subject_group", "subject_gender"]:
             if col in df.columns:
                 df[col] = df[col].astype("category")
@@ -730,10 +941,6 @@ class FeaturesDataset:
 
     @cached_property
     def wide_scalar_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide sujet-level des features scalaires uniquement.
-        Construction vectorisée.
-        """
         data = np.vstack([
             ds.features_df.to_numpy(dtype=np.float32, copy=False).ravel(order="C")
             for ds in self.participant_datasets
@@ -747,10 +954,6 @@ class FeaturesDataset:
 
     @cached_property
     def wide_connectivity_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide sujet-level de la connectivité PPC.
-        Construction vectorisée sur triangle supérieur.
-        """
         first = self.participant_datasets[0]
         ii, jj = first.ppc_upper_triangle_indices
 
@@ -775,13 +978,6 @@ class FeaturesDataset:
 
     @cached_property
     def wide_dataframe(self) -> pd.DataFrame:
-        """
-        Vue wide complète.
-
-        Important :
-        - pas de merge
-        - concat direct car l'ordre des sujets est identique
-        """
         scalar_only = self.wide_scalar_dataframe
         conn_only = self.wide_connectivity_dataframe.drop(
             columns=self.SUBJECT_METADATA_COLUMNS,
@@ -808,7 +1004,6 @@ class FeaturesDataset:
             )
 
             df_long["subject_id"] = subject.id
-            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -836,7 +1031,6 @@ class FeaturesDataset:
             )
 
             df_long["subject_id"] = subject.id
-            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -858,7 +1052,6 @@ class FeaturesDataset:
             df_long = participant_dataset.ppc_edge_dataframe.copy()
 
             df_long["subject_id"] = subject.id
-            #df_long["subject_tag"] = subject.tag
             df_long["subject_age"] = subject.age
             df_long["subject_health"] = subject.health_state
             df_long["subject_group"] = subject.group
@@ -891,34 +1084,209 @@ class FeaturesDataset:
     @cached_property
     def all_feature_names(self):
         return list(self.wide_dataframe.columns)
-    
+
     @cached_property
-    def groups(self):
-        return self.wide_dataframe["subject_id"]
-    
+    def X(self) -> pd.DataFrame:
+        """
+        Par défaut, X = toutes les colonnes de features wide disponibles,
+        hors colonnes de métadonnées non prédictives.
+        """
+        excluded_columns = {"subject_id", "subject_health"}
+
+        feature_columns = [
+            col
+            for col in self.wide_dataframe.columns
+            if col not in excluded_columns
+        ]
+        return self.wide_dataframe[feature_columns]
+
     @cached_property
     def y(self):
         return self.wide_dataframe["subject_health"]
 
-               
-    
+    @cached_property
+    def sample_groups(self):
+        """
+        Groupes pour la CV au niveau lignes de X.
+        Ici : subject_id.
+        """
+        return self.wide_dataframe["subject_id"]
+
+
 class SelectedFeaturesDataset(FeaturesDataset):
-    def __init__(self, participant_datasets, selected_feature_names:list[str]):
+    """
+    Vue restreinte d'un FeaturesDataset.
+
+    Important
+    ---------
+    - `selected_columns` = colonnes wide effectivement conservées pour ML
+    - `feature_names`    = familles métier encore présentes dans ces colonnes
+
+    Cela permet à la fois :
+    - d'utiliser `X` correctement
+    - de reconstruire les blocs restants pour le FeatureSelector
+    """
+
+    def __init__(
+        self,
+        participant_datasets: list["SingleParticipantProcessedFeatureDataset"],
+        selected_columns: list[str],
+    ):
         super().__init__(participant_datasets)
-        self.selected_features = selected_feature_names
+
+        if not selected_columns:
+            raise ValueError("`selected_columns` cannot be empty.")
+
+        self.selected_columns = list(dict.fromkeys(selected_columns))
+
+    # ==========================================================================
+    # Helpers de parsing de colonnes wide -> familles métier
+    # ==========================================================================
+
+    @classmethod
+    def _is_metadata_column(cls, column_name: str) -> bool:
+        return column_name in cls.SUBJECT_METADATA_COLUMNS
+
+    @classmethod
+    def _is_subject_feature_column(cls, column_name: str) -> bool:
+        return column_name in cls.SUBJECT_FEATURE_COLUMNS
+
+    @classmethod
+    def _is_connectivity_column(cls, column_name: str) -> bool:
+        return str(column_name).startswith(cls.CONNECTIVITY_PREFIX)
+
+    @classmethod
+    def _scalar_column_to_feature_name(cls, column_name: str) -> str:
+        """
+        Exemple :
+        - Fp1_theta_beta_ratio -> theta_beta_ratio
+        - Cz_entropy -> entropy
+
+        On suppose que le format est :
+        <channel>_<feature_name>
+        et que le channel ne contient pas "_".
+        """
+        parts = str(column_name).split("_", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid scalar column format: '{column_name}'")
+        return parts[1]
+
+    @classmethod
+    def _connectivity_column_to_feature_name(cls, column_name: str) -> str:
+        """
+        Exemple :
+        - cn_alpha_Fp1_Fp2 -> cn_alpha
+
+        On suppose le format :
+        cn_<band>_<seed>_<target>
+        """
+        parts = str(column_name).split("_")
+        if len(parts) < 4:
+            raise ValueError(f"Invalid connectivity column format: '{column_name}'")
+        return f"{parts[0]}_{parts[1]}"
+
+    # ==========================================================================
+    # Colonnes effectivement disponibles
+    # ==========================================================================
 
     @cached_property
-    def X(self):
-        return self.wide_dataframe[self.selected_features]
-    
+    def X(self) -> pd.DataFrame:
+        return self.wide_dataframe[self.selected_columns]
+
+    @cached_property
+    def all_feature_names(self) -> list[str]:
+        return list(self.selected_columns)
+
+    # ==========================================================================
+    # Familles métier encore disponibles après présélection
+    # ==========================================================================
+
+    @cached_property
+    def scalar_feature_names(self) -> list[str]:
+        names: list[str] = []
+
+        for col in self.selected_columns:
+            if self._is_metadata_column(col):
+                continue
+            if self._is_subject_feature_column(col):
+                continue
+            if self._is_connectivity_column(col):
+                continue
+
+            feature_name = self._scalar_column_to_feature_name(col)
+            names.append(feature_name)
+
+        return list(dict.fromkeys(names))
+
+    @cached_property
+    def connectivity_feature_names(self) -> list[str]:
+        names: list[str] = []
+
+        for col in self.selected_columns:
+            if self._is_metadata_column(col):
+                continue
+            if not self._is_connectivity_column(col):
+                continue
+
+            feature_name = self._connectivity_column_to_feature_name(col)
+            if feature_name == "cn_full":
+                continue
+
+            names.append(feature_name)
+
+        return list(dict.fromkeys(names))
+
+    @cached_property
+    def subject_feature_names(self) -> list[str]:
+        names: list[str] = []
+
+        for col in self.selected_columns:
+            if self._is_subject_feature_column(col):
+                names.append(col)
+
+        return list(dict.fromkeys(names))
+
+    @property
+    def feature_names(self) -> list[str]:
+        """
+        Familles métier encore présentes dans la sélection courante.
+        """
+        return (
+            self.scalar_feature_names
+            + self.connectivity_feature_names
+            + self.subject_feature_names
+        )
+
 
 class FeaturesDatasetSelector:
     @staticmethod
-    def select(dataset:FeaturesDataset, selection:list[str]):
-        return SelectedFeaturesDataset(participant_datasets=dataset.participant_datasets, selected_feature_names=selection)
+    def select(dataset: FeaturesDataset, selection: list[str]) -> SelectedFeaturesDataset:
+        """
+        Restreint un dataset à un sous-ensemble de colonnes wide.
 
-    
-        
+        Important :
+        - `selection` contient des colonnes wide
+        - le SelectedFeaturesDataset reconstruit automatiquement les familles
+          métier encore disponibles à partir de ces colonnes
+        """
+        if selection is None:
+            raise ValueError("`selection` cannot be None.")
+
+        selection = list(dict.fromkeys(selection))
+        if not selection:
+            raise ValueError("`selection` cannot be empty.")
+
+        available_columns = set(dataset.wide_dataframe.columns)
+        missing = [col for col in selection if col not in available_columns]
+        if missing:
+            raise KeyError(
+                f"Some selected columns do not exist in dataset.wide_dataframe: {missing[:10]}"
+            )
+
+        return SelectedFeaturesDataset(
+            participant_datasets=dataset.participant_datasets,
+            selected_columns=selection,
+        )     
 
 from features.factory import CompleteFeatureExtractionResult
 from features.results import (
