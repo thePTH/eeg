@@ -7,52 +7,55 @@ from typing import Iterable
 @dataclass(frozen=True)
 class FeatureNameHelper:
     """
-    Helper pour construire une liste de noms de features à partir d'inputs simples.
+    Helper permettant de reconstruire des noms de colonnes de features
+    à partir de familles de features.
 
-    Types de features supportés
-    ---------------------------
-    1) EEG scalaires
-       Convention :
-           <CHANNEL>_<EEG_FEATURE>
-       Exemple :
-           O1_relative_wavelet_energy
+    Conventions supportées
+    ----------------------
+    1) EEG :
+        <CHANNEL>_<EEG_FAMILY>
+        Exemple :
+            O1_relative_wavelet_energy
 
-    2) Connectivité
-       Convention :
-           cn_<BAND>_<EDGE>
-       Exemple :
-           cn_alpha_O1_F7
+    2) Connectivité :
+        cn_<BAND>_<EDGE>
+        Exemple :
+            cn_alpha_O1_F7
 
-    3) Subject
-       Convention :
-           subject_<FIELD>
-       Exemples :
-           subject_id
-           subject_health
-           subject_group
-           subject_gender
-           subject_age
-           subject_mmse
+    3) Subject :
+        subject_<FIELD>
+        Exemple :
+            subject_age
+            subject_mmse
 
-    Exemples
-    --------
-    >>> helper = FeatureNameHelper(available_features)
+    Utilisation principale
+    ----------------------
+    On peut désormais appeler :
 
-    >>> helper.build(eeg="relative_wavelet_energy", channels="O1")
+    >>> helper.build(family_names="relative_wavelet_energy", channels="O1")
     ['O1_relative_wavelet_energy']
 
-    >>> helper.build(cn="alpha", edges="O1_F7")
+    >>> helper.build(family_names="alpha", edges="O1_F7")
     ['cn_alpha_O1_F7']
 
-    >>> helper.build(subject=["subject_age", "subject_mmse"])
-    ['subject_age', 'subject_mmse']
+    >>> helper.build(family_names="subject_age")
+    ['subject_age']
 
     >>> helper.build(
-    ...     eeg=["variance"],
+    ...     family_names=["variance", "alpha", "subject_age"],
     ...     channels=["O1", "O2"],
-    ...     subject=["subject_age"]
+    ...     edges=["O1_F7"]
     ... )
-    ['O1_variance', 'O2_variance', 'subject_age']
+    ['O1_variance', 'O2_variance', 'cn_alpha_O1_F7', 'subject_age']
+
+    Règles
+    ------
+    - `family_names` est l'API recommandée.
+    - Une famille EEG utilise `channels` si fourni, sinon tous les canaux disponibles.
+    - Une famille CN utilise `edges` si fourni, sinon toutes les arêtes disponibles.
+    - Une famille subject n'utilise ni `channels` ni `edges`.
+    - Si une famille est ambiguë (par ex. même nom existant en EEG et CN), on lève
+      une erreur explicite.
     """
 
     available_features: list[str]
@@ -62,50 +65,67 @@ class FeatureNameHelper:
             raise ValueError("`available_features` ne peut pas être vide.")
 
         eeg_channels: set[str] = set()
-        eeg_feature_names: set[str] = set()
+        eeg_family_names: set[str] = set()
 
         cn_bands: set[str] = set()
         cn_edges: set[str] = set()
 
         subject_features: set[str] = set()
 
+        # Mapping famille -> types possibles {"eeg", "cn", "subject"}
+        family_to_kinds: dict[str, set[str]] = {}
+
         for feature in self.available_features:
+            if not isinstance(feature, str) or not feature.strip():
+                raise ValueError("Toutes les features disponibles doivent être des chaînes non vides.")
+
             parts = feature.split("_")
 
-            # -----------------------------------------------------------------
-            # Subject features : subject_xxx
-            # -----------------------------------------------------------------
+            # -------------------------------------------------------------
+            # SUBJECT : subject_xxx
+            # -------------------------------------------------------------
             if feature.startswith("subject_"):
                 subject_features.add(feature)
+                family_to_kinds.setdefault(feature, set()).add("subject")
                 continue
 
-            # -----------------------------------------------------------------
-            # Connectivity features : cn_<band>_<edge>
-            # Ex: cn_alpha_O1_F7
-            # -----------------------------------------------------------------
+            # -------------------------------------------------------------
+            # CONNECTIVITY : cn_<band>_<edge>
+            # Exemple : cn_alpha_O1_F7
+            # -------------------------------------------------------------
             if len(parts) >= 4 and parts[0] == "cn":
                 band = parts[1]
                 edge = "_".join(parts[2:])
+
                 cn_bands.add(band)
                 cn_edges.add(edge)
+                family_to_kinds.setdefault(band, set()).add("cn")
                 continue
 
-            # -----------------------------------------------------------------
-            # EEG features : <channel>_<feature_name>
-            # Ex: O1_relative_wavelet_energy
-            # -----------------------------------------------------------------
+            # -------------------------------------------------------------
+            # EEG : <channel>_<family>
+            # Exemple : O1_relative_wavelet_energy
+            # -------------------------------------------------------------
             if len(parts) >= 2 and parts[0] != "cn":
                 channel = parts[0]
-                eeg_feature = "_".join(parts[1:])
+                family_name = "_".join(parts[1:])
+
                 eeg_channels.add(channel)
-                eeg_feature_names.add(eeg_feature)
+                eeg_family_names.add(family_name)
+                family_to_kinds.setdefault(family_name, set()).add("eeg")
+                continue
 
         object.__setattr__(self, "_available_set", set(self.available_features))
         object.__setattr__(self, "_eeg_channels", sorted(eeg_channels))
-        object.__setattr__(self, "_eeg_feature_names", sorted(eeg_feature_names))
+        object.__setattr__(self, "_eeg_family_names", sorted(eeg_family_names))
         object.__setattr__(self, "_cn_bands", sorted(cn_bands))
         object.__setattr__(self, "_cn_edges", sorted(cn_edges))
         object.__setattr__(self, "_subject_features", sorted(subject_features))
+        object.__setattr__(
+            self,
+            "_family_to_kinds",
+            {family: frozenset(kinds) for family, kinds in family_to_kinds.items()},
+        )
 
     @staticmethod
     def _normalize_to_list(
@@ -129,94 +149,167 @@ class FeatureNameHelper:
         if len(items) == 0:
             raise ValueError(f"`{field_name}` ne peut pas être vide.")
 
+        cleaned_items: list[str] = []
         for item in items:
             if not isinstance(item, str):
                 raise TypeError(
                     f"Tous les éléments de `{field_name}` doivent être des chaînes de caractères."
                 )
+            stripped = item.strip()
+            if not stripped:
+                raise ValueError(
+                    f"Tous les éléments de `{field_name}` doivent être des chaînes non vides."
+                )
+            cleaned_items.append(stripped)
 
-        return items
+        return cleaned_items
+
+    def _resolve_family_kind(self, family_name: str) -> str:
+        """
+        Détermine automatiquement si une famille correspond à :
+        - 'eeg'
+        - 'cn'
+        - 'subject'
+
+        Lève une erreur si la famille est inconnue ou ambiguë.
+        """
+        kinds = self._family_to_kinds.get(family_name)
+
+        if kinds is None:
+            raise ValueError(
+                f"Famille inconnue : '{family_name}'. "
+                f"Familles EEG disponibles : {self._eeg_family_names}. "
+                f"Familles CN disponibles : {self._cn_bands}. "
+                f"Subject features disponibles : {self._subject_features}."
+            )
+
+        if len(kinds) > 1:
+            raise ValueError(
+                f"La famille '{family_name}' est ambiguë : elle peut correspondre à {sorted(kinds)}. "
+                "Utilise une méthode plus explicite ou renomme les familles pour lever l'ambiguïté."
+            )
+
+        return next(iter(kinds))
 
     def build(
         self,
         *,
+        family_names: str | Iterable[str] | None = None,
+        channels: str | Iterable[str] | None = None,
+        edges: str | Iterable[str] | None = None,
         eeg: str | Iterable[str] | None = None,
         cn: str | Iterable[str] | None = None,
         subject: str | Iterable[str] | None = None,
-        channels: str | Iterable[str] | None = None,
-        edges: str | Iterable[str] | None = None,
     ) -> list[str]:
         """
-        Construit une liste de noms de features existants à partir d'inputs simples.
+        Construit une liste de noms de features existants.
 
-        Paramètres
-        ----------
-        eeg:
-            Nom ou liste de noms de features EEG.
+        API recommandée
+        ---------------
+        family_names:
+            Nom(s) de famille à résoudre automatiquement.
             Exemples :
-                "relative_wavelet_energy"
-                ["variance", "spectral_centroid"]
-
-        cn:
-            Bande ou liste de bandes de connectivité.
-            Exemples :
-                "alpha"
-                ["delta", "theta", "alpha"]
-
-        subject:
-            Nom ou liste de noms de subject features.
-            Exemples :
-                "subject_age"
-                ["subject_age", "subject_mmse"]
+                "variance"       -> EEG
+                "alpha"          -> CN
+                "subject_age"    -> subject
 
         channels:
-            Canal ou liste de canaux pour les EEG features.
-            Si None et `eeg` est renseigné, tous les canaux disponibles sont utilisés.
+            Canaux à utiliser pour les familles EEG.
+            Si None, tous les canaux EEG disponibles sont utilisés.
 
         edges:
-            Edge ou liste d'edges pour les connectivity features.
-            Si None et `cn` est renseigné, toutes les edges disponibles sont utilisées.
+            Arêtes à utiliser pour les familles CN.
+            Si None, toutes les arêtes CN disponibles sont utilisées.
+
+        Compatibilité ancienne API
+        --------------------------
+        eeg, cn, subject:
+            Toujours supportés pour rester compatible avec l'ancien code.
 
         Retour
         ------
         list[str]
-            Liste des features existantes, sans doublons, en conservant l'ordre.
-
-        Règles
-        ------
-        - Il faut renseigner au moins un parmi `eeg`, `cn`, `subject`.
-        - `channels` ne peut être utilisé que si `eeg` est renseigné.
-        - `edges` ne peut être utilisé que si `cn` est renseigné.
+            Liste des features existantes, sans doublons et en conservant l'ordre.
         """
-        eeg = self._normalize_to_list(eeg, "eeg")
-        cn = self._normalize_to_list(cn, "cn")
-        subject = self._normalize_to_list(subject, "subject")
+        family_names = self._normalize_to_list(family_names, "family_names")
         channels = self._normalize_to_list(channels, "channels")
         edges = self._normalize_to_list(edges, "edges")
 
-        if eeg is None and cn is None and subject is None:
+        eeg = self._normalize_to_list(eeg, "eeg")
+        cn = self._normalize_to_list(cn, "cn")
+        subject = self._normalize_to_list(subject, "subject")
+
+        if (
+            family_names is None
+            and eeg is None
+            and cn is None
+            and subject is None
+        ):
             raise ValueError(
-                "Il faut renseigner au moins un des champs `eeg`, `cn` ou `subject`."
+                "Il faut renseigner au moins un des champs "
+                "`family_names`, `eeg`, `cn` ou `subject`."
             )
-
-        if channels is not None and eeg is None:
-            raise ValueError("`channels` ne peut être utilisé que si `eeg` est renseigné.")
-
-        if edges is not None and cn is None:
-            raise ValueError("`edges` ne peut être utilisé que si `cn` est renseigné.")
 
         result: list[str] = []
 
-        # ---------------------------------------------------------------------
-        # EEG
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Nouvelle API : family_names
+        # ------------------------------------------------------------------
+        if family_names is not None:
+            unknown_channels = []
+            if channels is not None:
+                unknown_channels = sorted(set(channels) - set(self._eeg_channels))
+                if unknown_channels:
+                    raise ValueError(
+                        "Canaux inconnus : "
+                        f"{unknown_channels}. "
+                        f"Canaux disponibles : {self._eeg_channels}"
+                    )
+
+            unknown_edges = []
+            if edges is not None:
+                unknown_edges = sorted(set(edges) - set(self._cn_edges))
+                if unknown_edges:
+                    raise ValueError(
+                        "Arêtes inconnues : "
+                        f"{unknown_edges}. "
+                        f"Arêtes disponibles : {self._cn_edges}"
+                    )
+
+            for family_name in family_names:
+                kind = self._resolve_family_kind(family_name)
+
+                if kind == "eeg":
+                    eeg_channels = self._eeg_channels if channels is None else channels
+                    for channel in eeg_channels:
+                        feature_name = f"{channel}_{family_name}"
+                        if feature_name in self._available_set:
+                            result.append(feature_name)
+
+                elif kind == "cn":
+                    cn_edges = self._cn_edges if edges is None else edges
+                    for edge in cn_edges:
+                        feature_name = f"cn_{family_name}_{edge}"
+                        if feature_name in self._available_set:
+                            result.append(feature_name)
+
+                elif kind == "subject":
+                    if family_name in self._available_set:
+                        result.append(family_name)
+
+                else:
+                    raise RuntimeError(f"Type de famille inattendu : {kind}")
+
+        # ------------------------------------------------------------------
+        # Ancienne API explicite : EEG
+        # ------------------------------------------------------------------
         if eeg is not None:
-            unknown_eeg = sorted(set(eeg) - set(self._eeg_feature_names))
+            unknown_eeg = sorted(set(eeg) - set(self._eeg_family_names))
             if unknown_eeg:
                 raise ValueError(
                     "Features EEG inconnues : "
                     f"{unknown_eeg}. "
-                    f"Features EEG disponibles : {self._eeg_feature_names}"
+                    f"Features EEG disponibles : {self._eeg_family_names}"
                 )
 
             eeg_channels = self._eeg_channels if channels is None else channels
@@ -230,14 +323,14 @@ class FeatureNameHelper:
                 )
 
             for channel in eeg_channels:
-                for eeg_feature in eeg:
-                    feature_name = f"{channel}_{eeg_feature}"
+                for eeg_family in eeg:
+                    feature_name = f"{channel}_{eeg_family}"
                     if feature_name in self._available_set:
                         result.append(feature_name)
 
-        # ---------------------------------------------------------------------
-        # CONNECTIVITY
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Ancienne API explicite : CONNECTIVITY
+        # ------------------------------------------------------------------
         if cn is not None:
             unknown_cn = sorted(set(cn) - set(self._cn_bands))
             if unknown_cn:
@@ -263,9 +356,9 @@ class FeatureNameHelper:
                     if feature_name in self._available_set:
                         result.append(feature_name)
 
-        # ---------------------------------------------------------------------
-        # SUBJECT
-        # ---------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # Ancienne API explicite : SUBJECT
+        # ------------------------------------------------------------------
         if subject is not None:
             unknown_subject = sorted(set(subject) - set(self._subject_features))
             if unknown_subject:
@@ -279,7 +372,6 @@ class FeatureNameHelper:
                 if subject_feature in self._available_set:
                     result.append(subject_feature)
 
-        # Suppression des doublons en conservant l'ordre
         return list(dict.fromkeys(result))
 
     @property
@@ -287,8 +379,8 @@ class FeatureNameHelper:
         return list(self._eeg_channels)
 
     @property
-    def eeg_feature_names(self) -> list[str]:
-        return list(self._eeg_feature_names)
+    def eeg_family_names(self) -> list[str]:
+        return list(self._eeg_family_names)
 
     @property
     def cn_bands(self) -> list[str]:
@@ -301,3 +393,21 @@ class FeatureNameHelper:
     @property
     def subject_features(self) -> list[str]:
         return list(self._subject_features)
+
+    @property
+    def family_names(self) -> list[str]:
+        """
+        Toutes les familles connues, tous types confondus.
+        """
+        return sorted(self._family_to_kinds.keys())
+
+    def family_kind(self, family_name: str) -> str:
+        """
+        Retourne le type d'une famille :
+        - 'eeg'
+        - 'cn'
+        - 'subject'
+        """
+        if not isinstance(family_name, str) or not family_name.strip():
+            raise ValueError("`family_name` doit être une chaîne non vide.")
+        return self._resolve_family_kind(family_name.strip())

@@ -512,6 +512,7 @@ class FeatureSelector:
         max_features: int = 20,
         show_progress: bool = True,
     ) -> FeatureSelectionResult:
+        
         candidates = self._build_candidates_from_dataset(dataset)
 
         engine = ForwardSelectionEngine(
@@ -547,28 +548,7 @@ class FeatureSelector:
         self._last_result = result
         return result
 
-    def forward_selection(
-        self,
-        dataset: FeaturesDataset,
-        params: DecisionTreeParameters,
-        max_features: int = 20,
-        show_progress: bool = True,
-    ) -> tuple[list[str], list[str], float, float, float, Any]:
-        result = self.select(
-            dataset=dataset,
-            params=params,
-            max_features=max_features,
-            lambda_std=self.lambda_std,
-            show_progress=show_progress,
-        )
-        return (
-            result.selected_feature_names,
-            result.selected_columns,
-            result.best_score,
-            result.best_score_std,
-            result.best_objective_value,
-            result.final_model,
-        )
+
 
     def get_results_dataframe(self) -> pd.DataFrame:
         if self._last_result is None:
