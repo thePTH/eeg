@@ -1,146 +1,88 @@
 from itertools import product
-from prediction.decision_tree.trainer import DecisionTreeTrainer, SelectedFeaturesDataset, DecisionTreeParameters
-import numpy as np
-from tqdm import tqdm
-from dataclasses import dataclass
 from functools import cached_property
+from dataclasses import dataclass
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+from .base import DecisionTree, DecisionTreeParameters
+from .score import DecisionTreeScoreEngine
+from features.dataset import SelectedFeaturesDataset
 
 
 class HyperparameterGrid:
-    criterion:list[str]=["gini", "entropy"]
-    max_depth:list[int]=[5, 6, 7, 8, 10, 15, 20]
-    min_samples_split:list[int]=[2, 5, 10, 20]
-    min_samples_leaf:list[int]=[2, 5, 10, 20]
-    
+    criterion: list[str] = ["gini", "entropy"]
+    max_depth: list[int] = [5, 6, 7, 8, 10, 15, 20]
+    min_samples_split: list[int] = [2, 5, 10, 20]
+    min_samples_leaf: list[int] = [2, 5, 10, 20]
 
     def to_dict(self):
         return {
             "max_depth": self.max_depth,
             "min_samples_split": self.min_samples_split,
             "min_samples_leaf": self.min_samples_leaf,
-            "criterion": self.criterion
+            "criterion": self.criterion,
         }
-    
+
     @property
     def keys(self):
         return list(self.to_dict().keys())
-        
 
     @property
     def values(self):
         return list(self.to_dict().values())
-    
+
+    def iter_combinations(self):
+        for combo in product(*self.values):
+            params_dico = dict(zip(self.keys, combo))
+            yield DecisionTreeParameters(
+                criterion=params_dico["criterion"],
+                max_depth=params_dico["max_depth"],
+                min_samples_leaf=params_dico["min_samples_leaf"],
+                min_samples_split=params_dico["min_samples_split"],
+            )
+
     @cached_property
-    def all_combinations(self) ->list[DecisionTreeParameters]:
-        values = self.values
-        keys = self.keys
-        cartesian_product = list(product(*values))
-        all_params = []
-        for combo in cartesian_product :
-            params_dico = dict(zip(keys, combo))
-            
-            params = DecisionTreeParameters(criterion=params_dico["criterion"], max_depth=params_dico["max_depth"], min_samples_leaf=params_dico["min_samples_leaf"], min_samples_split=params_dico["min_samples_split"])
-
-            all_params.append(params)
-
-        return all_params
-    
-    @property
     def size(self):
-        return len(self.all_combinations)
-    
+        size = 1
+        for values in self.values:
+            size *= len(values)
+        return size
 
     def __repr__(self):
         return f"{self.to_dict()}"
 
 
-
-
-   
-
-
-class HyperparameterSearch:
-
-    def __init__(self, dataset:SelectedFeaturesDataset,trainer:DecisionTreeTrainer, lambda_std: float = 0.5):
-        """
-        Parameters
-        ----------
-        trainer : DecisionTreeTrainer
-            Objet responsable de la cross-validation.
-
-        lambda_std : float
-            Coefficient de pénalisation de l'écart-type :
-            score_adjusted = mean - lambda_std * std
-        """
+class DecisionTreeOptimizer:
+    def __init__(
+        self,
+        dataset: SelectedFeaturesDataset,
+        score_engine: DecisionTreeScoreEngine,
+    ):
         self.dataset = dataset
-        self.trainer = trainer
-        self.lambda_std = lambda_std
+        self.scorer = score_engine
 
-        # stockage complet des résultats
-        self.results = []
-
-    def search(self, grid:HyperparameterGrid):
-
+    def optimize(self, grid: HyperparameterGrid, lambda_std:float=0):
         best_adjusted_score = -np.inf
+        best_scoring = None
         best_params = None
-
-        
 
         print(f"🔍 Hyperparameter search ({grid.size} combinations)")
 
-        for params in tqdm(grid.all_combinations):
+        for params in tqdm(grid.iter_combinations(), total=grid.size):
+            decision_tree = DecisionTree(parameters=params)
+            scoring = self.scorer.score(decision_tree, self.dataset)
+            adjusted_score = scoring.adjusted_score(lambda_std)
 
 
-            score_mean, score_std = self.trainer.evaluate(
-                self.dataset,
-                params,
-            )
-
-            adjusted_score = score_mean - self.lambda_std * score_std
-
-            # stockage historique complet
-            self.results.append(
-                {
-                    "params": params,
-                    "mean": score_mean,
-                    "std": score_std,
-                    "adjusted": adjusted_score,
-                }
-            )
 
             if adjusted_score > best_adjusted_score:
                 best_adjusted_score = adjusted_score
                 best_params = params
+                best_scoring = scoring
 
         print(f"\n✅ Best params found: {best_params}")
-        
         print(f"Adjusted score = {best_adjusted_score:.4f}")
 
-        return best_params, best_adjusted_score
+        return DecisionTree(best_params), best_scoring
 
-    def get_top_k(self, k=5):
-        """
-        Retourne les k meilleurs résultats triés par score ajusté.
-        """
-        return sorted(
-            self.results,
-            key=lambda x: x["adjusted"],
-            reverse=True,
-        )[:k]
-
-    def get_results_dataframe(self):
-        """
-        Convertit l'historique en DataFrame pandas (pratique pour analyse).
-        """
-        import pandas as pd
-
-        rows = []
-
-        for entry in self.results:
-            row = entry["params"].to_dict()
-            row["mean"] = entry["mean"]
-            row["std"] = entry["std"]
-            row["adjusted"] = entry["adjusted"]
-            rows.append(row)
-
-        return pd.DataFrame(rows)

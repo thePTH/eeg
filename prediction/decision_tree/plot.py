@@ -4,12 +4,12 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, plot_tree
+from .base import TrainedDecisionTree
 
 class DecisionTreeVisualizationEngine :
     @staticmethod
     def plot(
-        tree: DecisionTreeClassifier,
-        train_dataset: SelectedFeaturesDataset,
+        decision_tree: TrainedDecisionTree,
         *,
         max_depth: int | None = None,
         figsize: tuple[float, float] | None = None,
@@ -78,6 +78,9 @@ class DecisionTreeVisualizationEngine :
         # ------------------------------------------------------------------
         # 2. Récupération automatique des noms de features
         # ------------------------------------------------------------------
+        tree = decision_tree.classifier
+        train_dataset = decision_tree.dataset
+
         feature_names = train_dataset.all_feature_names
 
 
