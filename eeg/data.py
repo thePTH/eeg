@@ -12,7 +12,7 @@ import mne
 from mne_bids import BIDSPath, read_raw_bids
 
 from eeg.signal import SampledSignal
-from participants.definition import Participant
+from participants.definition import Participant, ParticipantFactory
 from preprocessing.names import PipelineName
 from utils.enum import EnumParser
 
@@ -25,8 +25,13 @@ class EEGData(ABC):
     Classe racine représentant une donnée EEG.
 
     Cette classe supporte un mode lazy :
-    - soit le Raw est déjà en mémoire ;
+    - soit le Raw est déjà disponible ;
     - soit il est absent mais l'objet sait le reconstruire via `_raw_loader`.
+
+    Attention :
+    - `.load()` charge explicitement les données en RAM via `raw.load_data()`.
+    - Pour manipuler un Raw sans charger les données, il faut utiliser les méthodes lazy
+      du helper, qui n'appellent pas `.load()`.
     """
 
     def __init__(
@@ -34,7 +39,7 @@ class EEGData(ABC):
         *,
         raw: mne.io.Raw | None,
         sampling_frequency: float,
-        raw_loader: RawLoader | None = None,
+        raw_loader: Callable[[], mne.io.Raw] | None = None,
     ):
         self._raw = raw
         self._sampling_frequency = float(sampling_frequency)
@@ -54,14 +59,13 @@ class EEGData(ABC):
 
     @property
     def cache_key(self) -> str:
-        """
-        Clé logique utilisée pour certains caches de preprocessing.
-        """
         return f"{type(self).__name__}:{id(self)}"
 
     def load(self) -> Self:
         """
-        Charge le Raw si nécessaire.
+        Charge le Raw si nécessaire, puis charge les données en RAM.
+
+        Cette méthode n'est PAS lazy.
         """
         if self._raw is None:
             if self._raw_loader is None:
@@ -76,17 +80,10 @@ class EEGData(ABC):
         return self
 
     def unload(self) -> None:
-        """
-        Décharge complètement le Raw de la mémoire.
-        """
         self._raw = None
 
     @contextmanager
     def loaded(self) -> Iterator[mne.io.Raw]:
-        """
-        Context manager pratique :
-        charge si nécessaire, puis décharge en sortie si l'objet ne l'était pas avant.
-        """
         was_loaded = self.is_loaded
         self.load()
         try:
@@ -135,9 +132,6 @@ class EEGData(ABC):
             return raw.info
 
     def _copy_kwargs(self) -> dict:
-        """
-        Arguments nécessaires pour reconstruire un objet du même type.
-        """
         return {
             "raw": self._raw.copy() if self._raw is not None else None,
             "sampling_frequency": self.sampling_frequency,
@@ -148,15 +142,13 @@ class EEGData(ABC):
         return type(self)(**self._copy_kwargs())
 
     def update_raw(self, new_raw: mne.io.Raw, *, copy_raw: bool = False) -> Self:
-        """
-        Reconstruit un objet du même type avec un nouveau Raw.
-        """
         kwargs = self._copy_kwargs()
         kwargs["raw"] = new_raw.copy() if copy_raw else new_raw
 
-        # Une fois qu'on a un nouveau Raw transformé en mémoire,
-        # l'ancien loader n'est plus cohérent.
+        # Une fois qu'on a un nouveau Raw transformé,
+        # l'ancien loader n'est plus forcément cohérent.
         kwargs["raw_loader"] = None
+
         return type(self)(**kwargs)
 
     def plot(self):
@@ -270,13 +262,20 @@ class EEGRecordedDataProvider:
 
     @staticmethod
     def _make_raw_loader(subject: Participant, root: Path) -> RawLoader:
+        """
+        Construit un loader lazy.
+
+        Important :
+        - ne pas appeler raw.load_data()
+        - le Raw retourné reste en preload=False
+        """
+
         def loader() -> mne.io.Raw:
             bids_path = EEGRecordedDataProvider._build_bids_path(subject, root)
             raw = read_raw_bids(bids_path=bids_path, verbose=False)
 
             montage = mne.channels.make_standard_montage("standard_1020")
             raw.set_montage(montage, verbose=False)
-            raw.load_data(verbose=False)
 
             return raw
 
@@ -301,7 +300,7 @@ class EEGRecordedDataProvider:
             raw_preview.load_data(verbose=False)
             raw = raw_preview
         else:
-            raw = None
+            raw = raw_preview
 
         return EEGRecordedData(
             raw=raw,
@@ -317,13 +316,16 @@ class EEGRecordedDataProvider:
 
         with open(root / "participants.tsv", newline="") as f:
             reader = csv.DictReader(f, delimiter="\t")
+
             for row in reader:
                 subject = EEGRecordedDataProvider._extract_subject(row)
+
                 recorded_eeg = EEGRecordedDataProvider._extract_recorded_eeg(
                     subject=subject,
                     root=root,
                     load_data=load_data,
                 )
+
                 recordings.append(recorded_eeg)
 
         return recordings
@@ -345,7 +347,10 @@ class EEGRecordedDataHelper:
         window_seconds: int = 60,
     ) -> Iterator[EEGRecordedData]:
         """
-        Version génératrice du split en fenêtres.
+        Découpe classique.
+
+        Attention :
+        cette méthode charge le Raw en RAM car elle utilise `eeg.loaded()`.
         """
         with eeg.loaded() as raw:
             total_duration = float(raw.times[-1])
@@ -376,6 +381,95 @@ class EEGRecordedDataHelper:
     ) -> list[EEGRecordedData]:
         return list(
             EEGRecordedDataHelper.iter_split(
+                eeg=eeg,
+                t_start=t_start,
+                window_seconds=window_seconds,
+            )
+        )
+
+    @staticmethod
+    def _get_raw_without_loading(eeg: EEGRecordedData) -> mne.io.Raw:
+        """
+        Récupère un Raw sans appeler eeg.load().
+
+        Si eeg._raw existe, on l'utilise directement.
+        Sinon, on appelle le raw_loader, qui doit lui-même retourner un Raw non chargé.
+        """
+        if eeg._raw is not None:
+            raw = eeg._raw
+        elif eeg._raw_loader is not None:
+            raw = eeg._raw_loader()
+        else:
+            raise RuntimeError(
+                "Impossible de récupérer un Raw : aucun Raw ni raw_loader disponible."
+            )
+
+        if raw.preload:
+            raise RuntimeError(
+                "Le Raw est déjà chargé en mémoire. "
+                "Pour un découpage lazy, il faut un Raw avec preload=False."
+            )
+
+        return raw
+
+    @staticmethod
+    def iter_split_lazy(
+        eeg: EEGRecordedData,
+        t_start: int = 10,
+        window_seconds: int = 60,
+    ) -> Iterator[EEGRecordedData]:
+        """
+        Découpe un EEGRecordedData en fenêtres sans charger les données en RAM.
+
+        Cette méthode :
+        - n'appelle jamais eeg.load()
+        - n'appelle jamais raw.load_data()
+        - conserve preload=False
+        - découpe en contrôlant les samples via la fréquence d'échantillonnage
+        """
+        raw = EEGRecordedDataHelper._get_raw_without_loading(eeg)
+
+        sfreq = float(raw.info["sfreq"])
+
+        start_sample = int(t_start * sfreq)
+        window_samples = int(window_seconds * sfreq)
+
+        if window_samples <= 0:
+            raise ValueError("window_seconds doit être strictement positif.")
+
+        n_times = raw.n_times
+
+        if start_sample >= n_times:
+            return
+
+        n_full_windows = (n_times - start_sample) // window_samples
+
+        for i in range(n_full_windows):
+            sample_min = start_sample + i * window_samples
+            sample_max = sample_min + window_samples
+
+            tmin = sample_min / sfreq
+            tmax = sample_max / sfreq
+
+            raw_window = raw.copy().crop(
+                tmin=tmin,
+                tmax=tmax,
+                include_tmax=False,
+            )
+
+            yield eeg.update_raw(raw_window)
+
+    @staticmethod
+    def split_lazy(
+        eeg: EEGRecordedData,
+        t_start: int = 10,
+        window_seconds: int = 60,
+    ) -> list[EEGRecordedData]:
+        """
+        Version liste de iter_split_lazy.
+        """
+        return list(
+            EEGRecordedDataHelper.iter_split_lazy(
                 eeg=eeg,
                 t_start=t_start,
                 window_seconds=window_seconds,
@@ -436,78 +530,144 @@ class EEGRecordedDataHelper:
             raw_loader=eeg._raw_loader,
         )
 
+    
+
+import json
+
+
+
+
+RawLoader = Callable[[], mne.io.Raw]
+
+
+
+
+
+class EEGProcessedDataIO:
+    """
+    I/O optimisé pour EEGProcessedData.
+
+    Structure créée
+    ----------------
+    path/
+    └── sub-<id>-rec-XX/
+        ├── raw.fif.gz
+        └── metadata.json
+
+    XX est automatiquement incrémenté selon les enregistrements déjà présents.
+
+    Important :
+    - le nom du dossier suit exactement la même logique que
+      SingleParticipantProcessedFeatureDatasetIO ;
+    - cela permet de relier un EEGProcessedData exporté avec le
+      SingleParticipantProcessedFeatureDataset correspondant.
+    """
+
+    RAW_FILENAME = "raw.fif.gz"
+    METADATA_FILENAME = "metadata.json"
+
     @staticmethod
-    def tag(
-        eegs: list[EEGRecordedData],
-        train_ratio: float = 0.7,
-        validate_ratio: float = 0.15,
-        test_ratio: float = 0.15,
+    def _build_export_folder(
         *,
-        stratify_by: Literal["group", "health_state", "gender", "none"] = "group",
-        seed: int = 42,
-    ) -> list[EEGRecordedData]:
-        total_ratio = train_ratio + validate_ratio + test_ratio
-        if abs(total_ratio - 1.0) > 1e-9:
-            raise ValueError(
-                f"Les ratios doivent sommer à 1.0. Reçu : {total_ratio}"
+        root: Path,
+        subject_id: str,
+    ) -> tuple[Path, str]:
+        subject_prefix = f"sub-{subject_id}-rec-"
+
+        existing_indices = []
+
+        for folder in root.iterdir():
+            if folder.is_dir() and folder.name.startswith(subject_prefix):
+                suffix = folder.name.replace(subject_prefix, "")
+
+                if suffix.isdigit():
+                    existing_indices.append(int(suffix))
+
+        next_index = 1 if not existing_indices else max(existing_indices) + 1
+        recording_key = f"{next_index:02d}"
+
+        export_folder = root / f"{subject_prefix}{recording_key}"
+
+        return export_folder, recording_key
+
+    @staticmethod
+    def export(
+        eeg: EEGProcessedData,
+        path: str | Path,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        subject_id = eeg.source.subject.id
+
+        export_folder, recording_key = EEGProcessedDataIO._build_export_folder(
+            root=path,
+            subject_id=subject_id,
+        )
+
+        if export_folder.exists() and not overwrite:
+            raise FileExistsError(f"Folder already exists: {export_folder}")
+
+        export_folder.mkdir(parents=True, exist_ok=True)
+
+        raw_path = export_folder / EEGProcessedDataIO.RAW_FILENAME
+        metadata_path = export_folder / EEGProcessedDataIO.METADATA_FILENAME
+
+        with eeg.loaded() as raw:
+            raw.save(
+                raw_path,
+                overwrite=overwrite,
+                fmt="single",
+                verbose=False,
             )
 
-        if not eegs:
-            return []
+        metadata = {
+            "subject_dico": eeg.source.subject.to_dict(),
+            "pipeline_name": eeg.pipeline_name,
+            "sampling_frequency": eeg.sampling_frequency,
+            "recording_key": recording_key,
+        }
 
-        rng = Random(seed)
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
 
-        if stratify_by == "none":
-            groups = {"all": list(eegs)}
-        else:
-            buckets: dict[str, list[EEGRecordedData]] = defaultdict(list)
+        return export_folder
 
-            for eeg in eegs:
-                subject = eeg.subject
+    @staticmethod
+    def load(path: str | Path) -> EEGProcessedData:
+        path = Path(path)
 
-                if stratify_by == "group":
-                    key = subject.group
-                elif stratify_by == "health_state":
-                    key = subject.health_state
-                elif stratify_by == "gender":
-                    key = subject.gender
-                else:
-                    raise ValueError(f"stratify_by inconnu : {stratify_by}")
+        raw_path = path / EEGProcessedDataIO.RAW_FILENAME
+        metadata_path = path / EEGProcessedDataIO.METADATA_FILENAME
 
-                buckets[key].append(eeg)
+        if not raw_path.exists():
+            raise FileNotFoundError(f"Missing raw file: {raw_path}")
 
-            groups = dict(buckets)
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Missing metadata file: {metadata_path}")
 
-        tagged_eegs: list[EEGRecordedData] = []
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
 
-        for bucket in groups.values():
-            bucket_copy = bucket[:]
-            rng.shuffle(bucket_copy)
+        source = EEGRecordedData(
+            raw=None,
+            sampling_frequency=float(metadata["sampling_frequency"]),
+            subject=ParticipantFactory.build(metadata["subject_dico"]),
+            raw_loader=None,
+        )
 
-            n = len(bucket_copy)
-            n_train, n_validate, n_test = EEGRecordedDataHelper._largest_remainder_split(
-                n=n,
-                train_ratio=train_ratio,
-                validate_ratio=validate_ratio,
-                test_ratio=test_ratio,
+        def raw_loader() -> mne.io.Raw:
+            return mne.io.read_raw_fif(
+                raw_path,
+                preload=False,
+                verbose=False,
             )
 
-            train_part = bucket_copy[:n_train]
-            validate_part = bucket_copy[n_train:n_train + n_validate]
-            test_part = bucket_copy[n_train + n_validate:n_train + n_validate + n_test]
-
-            tagged_eegs.extend(
-                EEGRecordedDataHelper._copy_eeg_with_tag(eeg, "train")
-                for eeg in train_part
-            )
-            tagged_eegs.extend(
-                EEGRecordedDataHelper._copy_eeg_with_tag(eeg, "validate")
-                for eeg in validate_part
-            )
-            tagged_eegs.extend(
-                EEGRecordedDataHelper._copy_eeg_with_tag(eeg, "test")
-                for eeg in test_part
-            )
-
-        rng.shuffle(tagged_eegs)
-        return tagged_eegs
+        return EEGProcessedData(
+            raw=None,
+            source=source,
+            pipeline_name=metadata["pipeline_name"],
+            raw_loader=raw_loader,
+        )

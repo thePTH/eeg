@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from features.dataset import SingleParticipantProcessedFeatureDataset, FeaturesDataset
-
+from eeg.data import EEGProcessedDataIO
 
 class SingleParticipantProcessedFeatureDatasetIO:
     @staticmethod
@@ -72,19 +72,19 @@ class SingleParticipantProcessedFeatureDatasetIO:
             json.dump(metadata, f)
 
     @staticmethod
-    def load(path: str | Path) -> SingleParticipantProcessedFeatureDataset:
+    def load(feature_data_path: str | Path, eeg_data_path: str | Path=None) -> SingleParticipantProcessedFeatureDataset:
         """
         Recharge un SingleParticipantProcessedFeatureDataset depuis un dossier exporté.
         """
-        path = Path(path)
+        feature_data_path = Path(feature_data_path)
 
-        features_df = pd.read_parquet(path / "features.parquet")
+        features_df = pd.read_parquet(feature_data_path / "features.parquet")
         features_df = features_df.astype(np.float32, copy=False)
 
-        with open(path / "psd_band_results.json", "r") as f:
+        with open(feature_data_path / "psd_band_results.json", "r") as f:
             psd_band_results = json.load(f)
 
-        with open(path / "ppc_band_results.json", "r") as f:
+        with open(feature_data_path / "ppc_band_results.json", "r") as f:
             raw_ppc_band_results = json.load(f)
 
         # Conversion list -> ndarray float32
@@ -93,8 +93,11 @@ class SingleParticipantProcessedFeatureDatasetIO:
             for band_name, matrix in raw_ppc_band_results.items()
         }
 
-        with open(path / "metadata.json", "r") as f:
+        with open(feature_data_path / "metadata.json", "r") as f:
             metadata = json.load(f)
+
+
+        eeg = None if eeg_data_path is None else EEGProcessedDataIO.load(eeg_data_path)
 
         return SingleParticipantProcessedFeatureDataset(
             features_df=features_df,
@@ -103,6 +106,7 @@ class SingleParticipantProcessedFeatureDatasetIO:
             subject_dico=metadata["subject_dico"],
             pipeline_name=metadata["pipeline_name"],
             eeg_info_dico=metadata["eeg_info_dico"],
+            _eeg=eeg,
         )
 
 
@@ -119,15 +123,35 @@ class FeaturesDatasetIO:
             )
 
     @staticmethod
-    def load(folder_name_path: str | Path) -> FeaturesDataset:
+    def load(
+        feature_folder_name_path: str | Path,
+        eeg_folder_name_path: str | Path | None = None,
+    ) -> FeaturesDataset:
         participant_datasets = []
-        folder = Path(folder_name_path)
 
-        for dataset_folder_path in sorted(folder.iterdir()):
-            if dataset_folder_path.is_dir():
-                participant_dataset = SingleParticipantProcessedFeatureDatasetIO.load(
-                    dataset_folder_path
-                )
-                participant_datasets.append(participant_dataset)
+        feature_folder = Path(feature_folder_name_path)
+
+        eeg_folder = (
+            Path(eeg_folder_name_path)
+            if eeg_folder_name_path is not None
+            else None
+        )
+
+        for dataset_folder_path in sorted(feature_folder.iterdir()):
+            if not dataset_folder_path.is_dir():
+                continue
+
+            eeg_dataset_folder_path = (
+                eeg_folder / dataset_folder_path.name
+                if eeg_folder is not None
+                else None
+            )
+
+            participant_dataset = SingleParticipantProcessedFeatureDatasetIO.load(
+                dataset_folder_path,
+                eeg_data_path=eeg_dataset_folder_path,
+            )
+
+            participant_datasets.append(participant_dataset)
 
         return FeaturesDataset(participant_datasets)

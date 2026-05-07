@@ -5,4 +5,5 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 env/
-computed_data/
+computed_features/
+processed_data/

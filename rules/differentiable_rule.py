@@ -143,11 +143,7 @@ class DifferentiableRuleCandidateFactory:
         )
 
 
-DifferentiableRuleInput = Union[
-    DifferentiableRule,
-    list[DifferentiableRule],
-    DifferentiableDecisionRules,
-]
+
 
 
 class TruthDegreeEngine:
@@ -158,40 +154,29 @@ class TruthDegreeEngine:
     -------
     - DifferentiableSimpleDecisionRule -> Tensor [batch_size]
     - DifferentiableDecisionRule       -> Tensor [batch_size]
-    - list[DifferentiableRule]         -> Tensor [batch_size, n_rules]
-    - DifferentiableDecisionRules      -> Tensor [batch_size, n_rules]
+    
     """
 
     @staticmethod
     def compute(
-        rules: DifferentiableRuleInput,
+        rule: DifferentiableRule,
         candidate: DifferentiableRuleCandidate,
     ) -> torch.Tensor:
-        if isinstance(rules, DifferentiableSimpleDecisionRule):
+        if isinstance(rule, DifferentiableSimpleDecisionRule):
             return TruthDegreeEngine._compute_simple_rule(
-                rule=rules,
+                rule=rule,
                 candidate=candidate,
             )
 
-        if isinstance(rules, DifferentiableDecisionRule):
+        if isinstance(rule, DifferentiableDecisionRule):
             return TruthDegreeEngine._compute_decision_rule(
-                rule=rules,
+                rule=rule,
                 candidate=candidate,
             )
 
-        if isinstance(rules, DifferentiableDecisionRules):
-            return TruthDegreeEngine._compute_decision_rules(
-                rules=rules,
-                candidate=candidate,
-            )
+        
 
-        if isinstance(rules, list):
-            return TruthDegreeEngine._compute_rule_list(
-                rules=rules,
-                candidate=candidate,
-            )
-
-        raise TypeError(f"Unsupported rules type: {type(rules).__name__}")
+        raise TypeError(f"Unsupported rules type: {type(rule).__name__}")
 
     @staticmethod
     def _compute_simple_rule(
@@ -212,23 +197,12 @@ class TruthDegreeEngine:
             device=candidate.device,
         )
 
-        if rule.operator in {
-            DecisionOperator.LOWER,
-            DecisionOperator.LOWER_EQUAL,
-        }:
-            return torch.sigmoid(
-                (threshold - feature_values) / temperature
-            )
+        sign = 1 if rule.operator in {DecisionOperator.LOWER, DecisionOperator.LOWER_EQUAL} else - 1
 
-        if rule.operator in {
-            DecisionOperator.GREATER,
-            DecisionOperator.GREATER_EQUAL,
-        }:
-            return torch.sigmoid(
-                (feature_values - threshold) / temperature
-            )
 
-        raise ValueError(f"Unsupported operator: {rule.operator}")
+        return torch.sigmoid(sign * (threshold - feature_values) / temperature)
+
+        
 
     @staticmethod
     def _compute_decision_rule(
@@ -244,7 +218,7 @@ class TruthDegreeEngine:
 
         truth_degrees = [
             TruthDegreeEngine.compute(
-                rules=simple_rule,
+                rule=simple_rule,
                 candidate=candidate,
             )
             for simple_rule in rule.differentiable_rules
@@ -252,38 +226,7 @@ class TruthDegreeEngine:
 
         return torch.stack(truth_degrees, dim=0).min(dim=0).values
 
-    @staticmethod
-    def _compute_decision_rules(
-        rules: DifferentiableDecisionRules,
-        candidate: DifferentiableRuleCandidate,
-    ) -> torch.Tensor:
-        return TruthDegreeEngine._compute_rule_list(
-            rules=rules.differentiable_decision_rules,
-            candidate=candidate,
-        )
-
-    @staticmethod
-    def _compute_rule_list(
-        rules: list[DifferentiableRule],
-        candidate: DifferentiableRuleCandidate,
-    ) -> torch.Tensor:
-        if len(rules) == 0:
-            return torch.empty(
-                candidate.batch_size,
-                0,
-                dtype=candidate.dtype,
-                device=candidate.device,
-            )
-
-        truth_degrees = [
-            TruthDegreeEngine.compute(
-                rules=rule,
-                candidate=candidate,
-            )
-            for rule in rules
-        ]
-
-        return torch.stack(truth_degrees, dim=1)
+    
 
 
 class DifferentiableSimpleDecisionRuleFactory:
@@ -334,7 +277,7 @@ class DifferentiableDecisionRulesFactory:
         trained_tree: TrainedDecisionTree,
         c_tau: float = 0.1,
         min_tau: float = 0.001,
-    ) -> DifferentiableDecisionRules:
+    ) -> tuple[DifferentiableDecisionRules, TemperatureFeatureMapping]:
         temperature_feature_mapping = TemperatureFeatureMappingFactory.build(
             trained_tree.dataset,
             c_tau,
@@ -351,7 +294,4 @@ class DifferentiableDecisionRulesFactory:
             for decision_rule in decision_rules
         ]
 
-        return DifferentiableDecisionRules(
-            differentiable_decision_rules=differentiable_decision_rules,
-            temperature_feature_mapping=temperature_feature_mapping,
-        )
+        return differentiable_decision_rules, temperature_feature_mapping

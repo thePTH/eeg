@@ -26,7 +26,7 @@ def _canonical_edge_key(seed: str, target: str) -> str:
     a, b = sorted((str(seed), str(target)))
     return f"{a}__{b}"
 
-
+from eeg.data import EEGProcessedData
 @dataclass(slots=True)
 class SingleParticipantProcessedFeatureDataset:
     """
@@ -66,6 +66,7 @@ class SingleParticipantProcessedFeatureDataset:
     subject_dico: dict[str, Any]
     pipeline_name: str
     eeg_info_dico: dict[str, Any]
+    _eeg:EEGProcessedData
 
     _subject_cache: Any = field(init=False, default=None, repr=False)
     _eeg_info_cache: Any = field(init=False, default=None, repr=False)
@@ -248,3 +249,10 @@ class SingleParticipantProcessedFeatureDataset:
                 self._ppc_edge_dataframe_cache = pd.concat(rows, ignore_index=True)
 
         return self._ppc_edge_dataframe_cache
+    
+    @property
+    def eeg(self):
+        if self._eeg :
+            return self._eeg
+        else:
+            raise ValueError("EEG does not exist")

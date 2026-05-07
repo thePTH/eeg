@@ -222,6 +222,24 @@ class SelectedFeaturesDataset(FeaturesDataset):
             participant_datasets=selected_participants,
             selected_features=self.selected_features,
         )
+    
+
+    @cached_property
+    def X_and_eeg(self) -> pd.DataFrame:
+        """
+        Vue utile pour debug / visualisation pandas.
+
+        Contient :
+        - les colonnes explicatives X
+        - une colonne eeg contenant les EEGProcessedData lazy
+        """
+        return pd.concat(
+            [
+                self.X.reset_index(drop=True),
+                pd.Series(self.eegs, name="eeg"),
+            ],
+            axis=1,
+        )
 
 
 class SelectedFeaturesDatasetFactory:

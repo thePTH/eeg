@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from .participant import SingleParticipantProcessedFeatureDataset
     from .selector import SampleSelector
 
+from eeg.data import EEGProcessedData
+
 
 class FeaturesDataset:
     """
@@ -608,3 +610,28 @@ class FeaturesDataset:
             raise ValueError("Row selection produced an empty dataset.")
 
         return FeaturesDataset(participant_datasets=selected_participants)
+    
+
+    @cached_property
+    def eegs(self) -> list[EEGProcessedData]:
+        """
+        Liste des EEG associés aux lignes du dataset.
+
+        Important :
+        Les EEG restent lazy : on ne charge pas raw.get_data() ici.
+        """
+        return [dataset.eeg for dataset in self.participant_datasets]
+
+    @cached_property
+    def eeg_dataframe(self) -> pd.DataFrame:
+        """
+        Vue pandas associant chaque subject_id à son objet EEG.
+        """
+        return pd.DataFrame(
+            {
+                "subject_id": self.subject_dataframe["subject_id"].values,
+                "eeg": self.eegs,
+            }
+        )
+
+    
