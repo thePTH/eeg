@@ -35,3 +35,4 @@ class DeepEEGNet(nn.Module):
         return self.fc(h).squeeze(-1) # Shape: [batch_size]
     
     
+

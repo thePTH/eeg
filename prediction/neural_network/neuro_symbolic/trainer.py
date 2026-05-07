@@ -18,7 +18,7 @@ from prediction.neural_network.neuro_symbolic.logic_loss import (
 
 @dataclass
 class NeuroSymbolicDeepEEGTrainerParameters:
-    epochs: int
+    epochs: int = 5
     lr: float = 1e-3
     weight_decay: float = 1e-4
     lambda_logic: float = 0.5
@@ -67,7 +67,7 @@ class NeuroSymbolicDeepEEGTrainer:
                 )
 
                 # 2. Micro EEG -> micro logits
-                micro_logits = model(micro_x_raws)
+                micro_logits = torch.stack([model(micro_x_raw) for micro_x_raw in micro_x_raws])
 
                 # 3. Micro logits -> supervised loss
                 supervised_loss = MicroLogitsSupervisedLossAggregator.compute(
@@ -80,6 +80,7 @@ class NeuroSymbolicDeepEEGTrainer:
                 macro_ad_proba = MicroLogitsToMacroProbabilityAggregator.compute(
                     micro_logits,
                     self.params.probability_aggregator_params,
+                    batch_size=dataloader.batch_size
                 )
 
                 # 5. Logic loss
@@ -89,19 +90,21 @@ class NeuroSymbolicDeepEEGTrainer:
                     logic_loss = logic_loss + ConditionalViolationLossEngine.compute(
                         rule=rule,
                         macro_ad_proba=macro_ad_proba,
-                        macro_x_feat=macro_x_feat,
+                        x_feat=macro_x_feat,
                     )
 
                 # 6. Total loss
-                total_loss = supervised_loss + self.params.lambda_logic * logic_loss
+                lambda_logic = self.params.lambda_logic
+                total_loss = (1- lambda_logic) *  supervised_loss + self.params.lambda_logic * logic_loss
 
                 total_loss.backward()
                 optimizer.step()
 
             print(
                 f"Epoch {epoch + 1} | "
-                f"Sup Loss: {supervised_loss.item():.4f} | "
-                f"Logic Loss: {logic_loss.item():.4f}"
+                f"supervised_loss: {supervised_loss.item():.4f} | "
+                f"logic_loss: {logic_loss.item():.4f} | "
+                f"total_loss: {total_loss.item():.4f}"
             )
 
         return model

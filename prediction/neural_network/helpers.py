@@ -145,7 +145,7 @@ class MacroToMicroSegmenter:
 
     Sortie :
     --------
-    micro_x_raw : Tensor [batch_size, n_micro_segments, n_channels, n_times_micro]
+    micro_x_raw : Tensor [n_micro_segments, batch_size, n_channels, n_times_micro]
     """
 
     @staticmethod
@@ -173,6 +173,6 @@ class MacroToMicroSegmenter:
             n_times_micro,
         )
 
-        micro_x_raw = micro_x_raw.permute(0, 2, 1, 3).contiguous()
+        micro_x_raw = micro_x_raw.permute(2, 0, 1, 3).contiguous()
 
         return micro_x_raw
