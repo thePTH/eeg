@@ -7,7 +7,7 @@ from typing import Union
 import torch
 
 from rules.decision_rule import (
-    SimpleDecisionRule,
+    Condition,
     DecisionOperator,
     DecisionRule,
     DecisionRulesFactory,
@@ -25,7 +25,7 @@ class DifferentiableRule(ABC):
 
 
 @dataclass(frozen=True)
-class DifferentiableSimpleDecisionRule(DifferentiableRule):
+class DifferentiableCondition(DifferentiableRule):
     feature_name: str
     feature_index: int
     threshold: float
@@ -48,10 +48,10 @@ class DifferentiableDecisionRule(DifferentiableRule):
     prediction_probability: float
     support: int
     score: float
-    differentiable_rules: list[DifferentiableSimpleDecisionRule]
+    differentiable_conditions: list[DifferentiableCondition]
 
     def __str__(self) -> str:
-        conds = "\n  AND ".join(str(rule) for rule in self.differentiable_rules)
+        conds = "\n  AND ".join(str(rule) for rule in self.differentiable_conditions)
 
         return (
             f"{conds}\n"
@@ -162,9 +162,9 @@ class TruthDegreeEngine:
         rule: DifferentiableRule,
         candidate: DifferentiableRuleCandidate,
     ) -> torch.Tensor:
-        if isinstance(rule, DifferentiableSimpleDecisionRule):
-            return TruthDegreeEngine._compute_simple_rule(
-                rule=rule,
+        if isinstance(rule, DifferentiableCondition):
+            return TruthDegreeEngine._compute_condition(
+                condition=rule,
                 candidate=candidate,
             )
 
@@ -179,25 +179,25 @@ class TruthDegreeEngine:
         raise TypeError(f"Unsupported rules type: {type(rule).__name__}")
 
     @staticmethod
-    def _compute_simple_rule(
-        rule: DifferentiableSimpleDecisionRule,
+    def _compute_condition(
+        condition: DifferentiableCondition,
         candidate: DifferentiableRuleCandidate,
     ) -> torch.Tensor:
-        feature_values = candidate.get_feature_values(rule.feature_index)
+        feature_values = candidate.get_feature_values(condition.feature_index)
 
         threshold = torch.tensor(
-            rule.threshold,
+            condition.threshold,
             dtype=candidate.dtype,
             device=candidate.device,
         )
 
         temperature = torch.tensor(
-            rule.temperature,
+            condition.temperature,
             dtype=candidate.dtype,
             device=candidate.device,
         )
 
-        sign = 1 if rule.operator in {DecisionOperator.LOWER, DecisionOperator.LOWER_EQUAL} else - 1
+        sign = 1 if condition.operator in {DecisionOperator.LOWER, DecisionOperator.LOWER_EQUAL} else - 1
 
 
         return torch.sigmoid(sign * (threshold - feature_values) / temperature)
@@ -209,7 +209,7 @@ class TruthDegreeEngine:
         rule: DifferentiableDecisionRule,
         candidate: DifferentiableRuleCandidate,
     ) -> torch.Tensor:
-        if len(rule.differentiable_rules) == 0:
+        if len(rule.differentiable_conditions) == 0:
             return torch.ones(
                 candidate.batch_size,
                 dtype=candidate.dtype,
@@ -218,10 +218,10 @@ class TruthDegreeEngine:
 
         truth_degrees = [
             TruthDegreeEngine.compute(
-                rule=simple_rule,
+                rule=condition,
                 candidate=candidate,
             )
-            for simple_rule in rule.differentiable_rules
+            for condition in rule.differentiable_conditions
         ]
 
         return torch.stack(truth_degrees, dim=0).min(dim=0).values
@@ -232,11 +232,11 @@ class TruthDegreeEngine:
 class DifferentiableSimpleDecisionRuleFactory:
     @staticmethod
     def build(
-        simple_decision_rule: SimpleDecisionRule,
+        simple_decision_rule: Condition,
         feature_index: int,
         temperature: float,
-    ) -> DifferentiableSimpleDecisionRule:
-        return DifferentiableSimpleDecisionRule(
+    ) -> DifferentiableCondition:
+        return DifferentiableCondition(
             feature_name=simple_decision_rule.feature_name,
             feature_index=feature_index,
             threshold=simple_decision_rule.threshold,
@@ -261,7 +261,7 @@ class DifferentiableDecisionRulesFactory:
                     simple_rule.feature_name
                 ),
             )
-            for simple_rule in decision_rule.simple_rules
+            for simple_rule in decision_rule.conditions
         ]
 
         return DifferentiableDecisionRule(
@@ -269,7 +269,7 @@ class DifferentiableDecisionRulesFactory:
             prediction_probability=decision_rule.prediction_probability,
             support=decision_rule.support,
             score=decision_rule.score,
-            differentiable_rules=differentiable_rules,
+            differentiable_conditions=differentiable_rules,
         )
 
     @staticmethod

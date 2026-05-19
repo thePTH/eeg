@@ -134,7 +134,7 @@ class NeuroSymbolicEEGDataset(Dataset):
         return torch.as_tensor(y_values, dtype=torch.float32)
 
 
-class NeuroSymbolicEEGDataLoaderFactory:
+class NeuroSymbolicEEGDataloaderFactory:
 
     @staticmethod
     def build(

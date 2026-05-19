@@ -38,7 +38,7 @@ class Rule(ABC):
 
 
 @dataclass(frozen=True)
-class SimpleDecisionRule(Rule):
+class Condition(Rule):
     feature_name: str
     threshold: float
     operator: DecisionOperator
@@ -53,10 +53,10 @@ class DecisionRule(Rule):
     prediction_probability: float
     support: int
     score: float
-    simple_rules: list[SimpleDecisionRule]
+    conditions: list[Condition]
 
     def __str__(self) -> str:
-        conds = "\n  AND ".join(str(rule) for rule in self.simple_rules)
+        conds = "\n  AND ".join(str(rule) for rule in self.conditions)
 
         return (
             f"{conds}\n"
@@ -109,8 +109,8 @@ class RuleCheckerCandidateFactory:
 class DecisionRuleChecker:
     @staticmethod
     def check(rule: Rule, candidate: RuleCheckerCandidate) -> bool:
-        if isinstance(rule, SimpleDecisionRule):
-            return DecisionRuleChecker._check_simple_rule(
+        if isinstance(rule, Condition):
+            return DecisionRuleChecker._check_condition(
                 rule=rule,
                 candidate=candidate,
             )
@@ -124,8 +124,8 @@ class DecisionRuleChecker:
         raise TypeError(f"Unsupported rule type: {type(rule).__name__}")
 
     @staticmethod
-    def _check_simple_rule(
-        rule: SimpleDecisionRule,
+    def _check_condition(
+        rule: Condition,
         candidate: RuleCheckerCandidate,
     ) -> bool:
         feature_value = candidate.get_value(rule.feature_name)
@@ -145,7 +145,7 @@ class DecisionRuleChecker:
                 rule=simple_rule,
                 candidate=candidate,
             )
-            for simple_rule in rule.simple_rules
+            for simple_rule in rule.conditions
         )
 
 
@@ -164,7 +164,7 @@ class DecisionRulesFactory:
 
         def recurse(
             node_id: int,
-            current_rules: list[SimpleDecisionRule],
+            current_rules: list[Condition],
         ) -> None:
             feature_index = tree.feature[node_id]
 
@@ -190,7 +190,7 @@ class DecisionRulesFactory:
                         prediction_probability=prediction_probability,
                         support=support,
                         score=float(score),
-                        simple_rules=current_rules.copy(),
+                        conditions=current_rules.copy(),
                     )
                 )
                 return
@@ -202,7 +202,7 @@ class DecisionRulesFactory:
                 node_id=tree.children_left[node_id],
                 current_rules=current_rules
                 + [
-                    SimpleDecisionRule(
+                    Condition(
                         feature_name=feature_name,
                         threshold=threshold,
                         operator=DecisionOperator.LOWER_EQUAL,
@@ -214,7 +214,7 @@ class DecisionRulesFactory:
                 node_id=tree.children_right[node_id],
                 current_rules=current_rules
                 + [
-                    SimpleDecisionRule(
+                    Condition(
                         feature_name=feature_name,
                         threshold=threshold,
                         operator=DecisionOperator.GREATER,
