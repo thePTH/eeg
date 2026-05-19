@@ -115,15 +115,18 @@ class FeatureForwardSelectionEngine:
 
 
 class DecisionTreeFeatureSelectionTrainer:
-    def __init__(self, score_engine:DecisionTreeScoreEngine, lambda_std:float=0):
+    def __init__(self, score_engine:DecisionTreeScoreEngine, lambda_std:float=0, random_seed:int=42, output_test_size:float=0.2):
         self.score_engine = score_engine
         self.lambda_std = lambda_std
+        self.random_seed = random_seed
+        self.output_test_size = output_test_size
+        
 
     def train(self, decision_tree:DecisionTree, dataset:SelectedFeaturesDataset):
         feature_selector = FeatureForwardSelectionEngine(self.score_engine, decision_tree)
 
         selected_dataset = feature_selector.run(dataset, self.lambda_std)
-        train_dataset, test_dataset = selected_dataset.selector.group_train_test_split()
+        train_dataset, test_dataset = selected_dataset.selector.group_train_test_split(random_state=self.random_seed, test_size=self.output_test_size)
         trained_tree = decision_tree.train(train_dataset)
 
         return trained_tree, test_dataset

@@ -137,7 +137,7 @@ class DecisionTreeDetailedScoreResult:
 
 
 class DecisionTreeScoreEngine:
-    def __init__(self, n_splits: int = 5, scoring: str = "balanced_accuracy"):
+    def __init__(self, n_splits: int = 5, scoring: str = "balanced_accuracy", random_seed:int=42):
         if n_splits < 2:
             raise ValueError("`n_splits` must be at least 2.")
 
@@ -146,6 +146,7 @@ class DecisionTreeScoreEngine:
 
         self.n_splits = n_splits
         self.scoring = scoring
+        self.random_seed = random_seed
 
     def score(
         self,
@@ -156,7 +157,7 @@ class DecisionTreeScoreEngine:
         y = dataset.y
         groups = dataset.groups
 
-        cv = GroupKFold(n_splits=self.n_splits)
+        cv = GroupKFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_seed)
 
         scores = cross_val_score(
             estimator=decision_tree.classifier,
