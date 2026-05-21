@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from eeg.data import EEGRecordedData, EEGProcessedData
+from eeg.data import EEGData, EEGProcessedData
 from preprocessing.step.base import PreprocessingStep
 
 
@@ -8,12 +8,19 @@ class PreprocessingPipeline:
     """
     Pipeline de preprocessing EEG optimisé.
 
-    Gains principaux
-    ----------------
-    - une seule copie de travail du Raw
-    - plus de copie complète à chaque step
-    - possibilité de préparer les steps une seule fois
-    - possibilité de réutiliser les caches internes des steps
+    Accepte maintenant :
+    - EEGRecordedData
+    - EEGProcessedData
+
+    Si on applique un pipeline sur un EEG déjà processed, alors le nouvel
+    EEGProcessedData a pour source directe cet EEG processed.
+
+    Exemple :
+        recorded
+            -> processed_1(source=recorded)
+            -> processed_2(source=processed_1)
+
+    On écrase donc bien la source logique par la dernière donnée EEG utilisée.
     """
 
     def __init__(self, name: str, steps: list[PreprocessingStep]):
@@ -37,16 +44,18 @@ class PreprocessingPipeline:
             "steps": [step.describe() for step in self.steps],
         }
 
-    def prepare(self, recorded_data: EEGRecordedData) -> None:
+    def prepare(self, eeg_data: EEGData) -> None:
         """
         Prépare toutes les steps sur un EEG source.
 
-        Très utile quand une step lourde, comme ASR, doit construire
-        une calibration réutilisable.
+        eeg_data peut être :
+        - EEGRecordedData
+        - EEGProcessedData
         """
-        with recorded_data.loaded():
+
+        with eeg_data.loaded():
             for step in self.steps:
-                step.prepare(recorded_data)
+                step.prepare(eeg_data)
 
     def clear_caches(self) -> None:
         for step in self.steps:
@@ -54,44 +63,50 @@ class PreprocessingPipeline:
 
     def compute(
         self,
-        recorded_data: EEGRecordedData,
+        eeg_data: EEGData,
         *,
         unload_source: bool = True,
         prepare_steps: bool = True,
     ) -> EEGProcessedData:
         """
-        Calcule l'EEG preprocessé à partir d'un EEG brut.
+        Calcule l'EEG preprocessé à partir de n'importe quel EEGData.
 
         Stratégie
         ---------
-        1. charge la source si nécessaire
+        1. charge l'EEG source si nécessaire
         2. prépare éventuellement les steps
-        3. crée UNE seule copie de travail du Raw
+        3. crée une seule copie de travail du Raw
         4. applique les steps sur cette copie
-        5. décharge la source si demandé
+        5. retourne EEGProcessedData(source=eeg_data)
+
+        Important
+        ---------
+        Si eeg_data est déjà un EEGProcessedData, on ne remonte pas à sa source.
+        Le nouveau processed pointe directement vers eeg_data.
         """
-        was_loaded_before = recorded_data.is_loaded
-        recorded_data.load()
+
+        was_loaded_before = eeg_data.is_loaded
+        eeg_data.load()
 
         try:
             if prepare_steps:
                 for step in self.steps:
-                    step.prepare(recorded_data)
+                    step.prepare(eeg_data)
 
-            current_raw = recorded_data.raw.copy()
+            current_raw = eeg_data.raw.copy()
 
             for step in self.steps:
                 current_raw = step.transform_raw(
                     current_raw,
-                    eeg_data=recorded_data,
+                    eeg_data=eeg_data,
                 )
 
             return EEGProcessedData(
                 raw=current_raw,
-                source=recorded_data,
+                source=eeg_data,
                 pipeline_name=self.name,
             )
 
         finally:
             if unload_source and not was_loaded_before:
-                recorded_data.unload()
+                eeg_data.unload()

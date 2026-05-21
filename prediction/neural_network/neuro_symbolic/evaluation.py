@@ -19,10 +19,12 @@ from sklearn.metrics import (
     cohen_kappa_score,
 )
 
-from prediction.neural_network.helpers import MacroToMicroSegmenter
+from tqdm.auto import tqdm
+
 from prediction.neural_network.neural_backbone.logits_aggregator import (
     MicroLogitsToMacroProbabilityAggregator,
 )
+
 
 
 @dataclass(frozen=True)
@@ -117,15 +119,6 @@ class NeuralNetworkEvaluationResult:
         )
 
     def print_report(self) -> None:
-        print("\n" + "=" * 90)
-        print("EEG NEURAL NETWORK EVALUATION")
-        print("=" * 90)
-
-        print("\n[0] Evaluation setup")
-        print("-" * 90)
-        print(f"Threshold:                 {self.threshold:.4f}")
-        print(f"Aggregation method:        {self.macro_aggregation_method}")
-
         print("\n[1] Global metrics")
         print("-" * 90)
         print(f"Accuracy:                  {self.accuracy:.4f}")
@@ -136,15 +129,7 @@ class NeuralNetworkEvaluationResult:
         print(f"Weighted precision:        {self.weighted_precision:.4f}")
         print(f"Weighted recall:           {self.weighted_recall:.4f}")
         print(f"Weighted F1-score:         {self.weighted_f1:.4f}")
-
-        if self.roc_auc is not None:
-            print(f"ROC AUC:                   {self.roc_auc:.4f}")
-
-        if self.average_precision is not None:
-            print(f"Average precision:         {self.average_precision:.4f}")
-
-        print(f"Matthews corrcoef:         {self.matthews_corrcoef:.4f}")
-        print(f"Cohen kappa:               {self.cohen_kappa:.4f}")
+        print(f"Threshold:                 {self.threshold:.4f}")
 
         print("\n[2] Confusion matrix")
         print("-" * 90)
@@ -154,19 +139,24 @@ class NeuralNetworkEvaluationResult:
         print("-" * 90)
         print(self.class_metrics_dataframe().to_string(index=False))
 
-        print("\n" + "=" * 90)
+
+@dataclass
+class NeuralNetworkEvaluationEngineParameters:
+    macro_aggregation_method: str = "mean_logit"
+    class_names: tuple[str, str] = ("Healthy", "Alzheimer")
 
 
 class NeuralNetworkEvaluationEngine:
-    @staticmethod
+    def __init__(self, params: NeuralNetworkEvaluationEngineParameters):
+        self.params = params
+
     @torch.no_grad()
     def evaluate(
+        self,
         model: nn.Module,
         dataloader,
         threshold: float = 0.5,
-        n_micro_segments: int = 60,
-        macro_aggregation_method: str = "mean_logit",
-        class_names: tuple[str, str] = ("Healthy", "Alzheimer"),
+        show_progress: bool = False,
     ) -> NeuralNetworkEvaluationResult:
 
         device = next(model.parameters()).device
@@ -175,26 +165,49 @@ class NeuralNetworkEvaluationEngine:
         y_true_list: list[torch.Tensor] = []
         y_proba_list: list[torch.Tensor] = []
 
-        for macro_x_raw, macro_x_feat, y_true in dataloader:
-            macro_x_raw = macro_x_raw.to(device)
+        iterator = tqdm(
+            dataloader,
+            desc=f"Evaluation threshold={threshold:.4f}",
+            leave=False,
+        ) if show_progress else dataloader
 
-            micro_x_raws = MacroToMicroSegmenter.split(
-                macro_x_raw,
-                n_micro_segments=n_micro_segments,
-            )
+        for micro_x_raws, macro_x_feat, y_true in iterator:
+            micro_x_raws = micro_x_raws.to(device)
+            y_true = y_true.to(device).float()
+
+            if micro_x_raws.ndim != 4:
+                raise ValueError(
+                    "Expected micro_x_raws with shape "
+                    "[batch, n_micro_segments, channels, samples]. "
+                    f"Got {micro_x_raws.shape}."
+                )
+
+            # DataLoader:
+            #   [batch, n_micro_segments, channels, samples]
+            #
+            # Aggregators:
+            #   [n_micro_segments, batch]
+            #
+            # Donc :
+            #   [n_micro_segments, batch, channels, samples]
+            micro_x_raws = micro_x_raws.permute(
+                1,
+                0,
+                2,
+                3,
+            ).contiguous()
 
             micro_logits = torch.stack(
                 [
                     model(micro_x_raw).squeeze(-1)
                     for micro_x_raw in micro_x_raws
-                ]
+                ],
+                dim=0,
             )
-
-            
 
             macro_ad_proba = MicroLogitsToMacroProbabilityAggregator.compute(
                 micro_logits=micro_logits,
-                method=macro_aggregation_method,
+                method=self.params.macro_aggregation_method,
             )
 
             if macro_ad_proba.ndim != 1:
@@ -223,25 +236,29 @@ class NeuralNetworkEvaluationEngine:
             zero_division=0,
         )
 
-        macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
-            y_true_arr,
-            y_pred_arr,
-            labels=labels,
-            average="macro",
-            zero_division=0,
+        macro_precision, macro_recall, macro_f1, _ = (
+            precision_recall_fscore_support(
+                y_true_arr,
+                y_pred_arr,
+                labels=labels,
+                average="macro",
+                zero_division=0,
+            )
         )
 
-        weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
-            y_true_arr,
-            y_pred_arr,
-            labels=labels,
-            average="weighted",
-            zero_division=0,
+        weighted_precision, weighted_recall, weighted_f1, _ = (
+            precision_recall_fscore_support(
+                y_true_arr,
+                y_pred_arr,
+                labels=labels,
+                average="weighted",
+                zero_division=0,
+            )
         )
 
         class_metrics = tuple(
             ClassEvaluationMetrics(
-                class_name=class_names[i],
+                class_name=self.params.class_names[i],
                 precision=float(precision[i]),
                 recall=float(recall[i]),
                 f1_score=float(f1[i]),
@@ -276,7 +293,7 @@ class NeuralNetworkEvaluationEngine:
             y_pred=y_pred_arr,
             y_proba=y_proba_arr,
             threshold=float(threshold),
-            macro_aggregation_method=macro_aggregation_method,
+            macro_aggregation_method=self.params.macro_aggregation_method,
             accuracy=float(accuracy),
             balanced_accuracy=float(balanced_accuracy),
             macro_precision=float(macro_precision),
@@ -292,3 +309,112 @@ class NeuralNetworkEvaluationEngine:
             confusion_matrix=cm,
             class_metrics=class_metrics,
         )
+
+
+class NeuralNetworkBestThresholdFactory:
+    @staticmethod
+    def find(
+        model: nn.Module,
+        dataloader,
+        decision_metrics: str,
+        evaluation_params: NeuralNetworkEvaluationEngineParameters,
+        thresholds: np.ndarray | None = None,
+    ) -> NeuralNetworkEvaluationResult:
+        """
+        Trouve le meilleur threshold en supposant que la fonction
+        threshold -> score est unimodale.
+
+        Utilise une recherche ternaire discrète au lieu de tester
+        tous les thresholds.
+        """
+
+        if thresholds is None:
+            thresholds = np.linspace(0.01, 0.99, 99)
+
+        thresholds = np.asarray(thresholds, dtype=float)
+
+        if thresholds.ndim != 1 or len(thresholds) == 0:
+            raise ValueError("thresholds must be a non-empty 1D array.")
+
+        engine = NeuralNetworkEvaluationEngine(evaluation_params)
+
+        cache: dict[int, NeuralNetworkEvaluationResult] = {}
+
+        def evaluate_index(index: int) -> tuple[float, NeuralNetworkEvaluationResult]:
+            if index not in cache:
+                result = engine.evaluate(
+                    model=model,
+                    dataloader=dataloader,
+                    threshold=float(thresholds[index]),
+                )
+
+                if not hasattr(result, decision_metrics):
+                    raise ValueError(
+                        f"Unknown decision metric: {decision_metrics}. "
+                        f"Available metrics include: "
+                        f"accuracy, balanced_accuracy, macro_precision, "
+                        f"macro_recall, macro_f1, weighted_precision, "
+                        f"weighted_recall, weighted_f1, "
+                        f"matthews_corrcoef, cohen_kappa."
+                    )
+
+                cache[index] = result
+
+            result = cache[index]
+            score = getattr(result, decision_metrics)
+
+            if score is None:
+                return -np.inf, result
+
+            return float(score), result
+
+        left = 0
+        right = len(thresholds) - 1
+
+        progress_bar = tqdm(
+            total=max(1, int(np.ceil(np.log(len(thresholds)) / np.log(1.5)))),
+            desc=f"Smart threshold search ({decision_metrics})",
+        )
+
+        while right - left > 3:
+            third = (right - left) // 3
+
+            mid1 = left + third
+            mid2 = right - third
+
+            score1, _ = evaluate_index(mid1)
+            score2, _ = evaluate_index(mid2)
+
+            progress_bar.set_postfix(
+                left=f"{thresholds[left]:.4f}",
+                right=f"{thresholds[right]:.4f}",
+                mid1=f"{thresholds[mid1]:.4f}",
+                mid2=f"{thresholds[mid2]:.4f}",
+                score1=f"{score1:.4f}",
+                score2=f"{score2:.4f}",
+            )
+            progress_bar.update(1)
+
+            if score1 < score2:
+                left = mid1
+            else:
+                right = mid2
+
+        progress_bar.close()
+
+        best_score = -np.inf
+        best_result: NeuralNetworkEvaluationResult | None = None
+
+        for index in range(left, right + 1):
+            score, result = evaluate_index(index)
+
+            if score > best_score:
+                best_score = score
+                best_result = result
+
+        if best_result is None:
+            raise RuntimeError(
+                f"Could not find a valid threshold using metric '{decision_metrics}'."
+            )
+
+        return best_result

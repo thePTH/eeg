@@ -25,6 +25,7 @@ class DecisionTreeFeatureSelectionTrainerParameters:
     lambda_std :float=0
     random_seed :int= 42
     output_test_size:float=0.2
+    output_val_size:float=0.3
 
 @dataclass
 class TemperatureFeatureMappingFactoryParameters:
@@ -59,14 +60,14 @@ class NeuroSymbolicRulesExtractor:
             hyperparamter_searcher = DecisionTreeOptimizer(dataset=dataset, score_engine=score_engine)
             optimized_decision_tree, _ = hyperparamter_searcher.optimize(hyperparamter_grid, lambda_std = self.decision_tree_optimizer_params.lambda_std)
 
-        decision_tree_trainer = DecisionTreeFeatureSelectionTrainer(score_engine=score_engine, lambda_std=self.decision_tree_trainer_params.lambda_std, random_seed=self.decision_tree_trainer_params.random_seed, output_test_size=self.decision_tree_trainer_params.output_test_size)
-        trained_tree, test_dataset = decision_tree_trainer.train(optimized_decision_tree, dataset)
+        decision_tree_trainer = DecisionTreeFeatureSelectionTrainer(score_engine=score_engine, lambda_std=self.decision_tree_trainer_params.lambda_std, random_seed=self.decision_tree_trainer_params.random_seed, output_test_size=self.decision_tree_trainer_params.output_test_size, output_val_size=self.decision_tree_trainer_params.output_val_size)
+        trained_tree, val_dataset, test_dataset = decision_tree_trainer.train(optimized_decision_tree, dataset)
         train_dataset = trained_tree.dataset
         
         differentiable_decision_rules, _ = DifferentiableDecisionRulesFactory.build(trained_tree, c_tau=self.temperature_feature_mapping_params.c_tau, min_tau=self.temperature_feature_mapping_params.min_tau)
         rules = sorted(differentiable_decision_rules, key=lambda rule : rule.score, reverse=True)
 
-        return rules, train_dataset, test_dataset
+        return rules, train_dataset,val_dataset, test_dataset
 
 
 
@@ -75,10 +76,10 @@ class NeuroSymbolicRulesExtractor:
 
 class NeuroSymbolicRulesExtractorDefaultBuilder:
     @staticmethod
-    def build(default_decision_tree:DecisionTree, random_seed = 42, test_size = 0.2):
+    def build(default_decision_tree:DecisionTree, random_seed = 42, test_size = 0.2, val_size=0.3):
         decision_tree_score_engine_params = DecisionTreeScoreEngineParameters(random_seed=random_seed)
         decision_tree_optimizer_params = DecisionTreeOptimizerParameters(default_optimized_decision_tree=default_decision_tree)
-        decision_tree_trainer_params = DecisionTreeFeatureSelectionTrainerParameters(random_seed=random_seed, output_test_size=test_size)
+        decision_tree_trainer_params = DecisionTreeFeatureSelectionTrainerParameters(random_seed=random_seed, output_test_size=test_size, output_val_size=val_size)
         temperature_feature_mapping_params = TemperatureFeatureMappingFactoryParameters()
         neuro_symbolic_rules_extractor = NeuroSymbolicRulesExtractor(decision_tree_score_engine_params, decision_tree_optimizer_params, decision_tree_trainer_params, temperature_feature_mapping_params)
 

@@ -7,3 +7,4 @@ __pycache__/
 env/
 computed_features/
 processed_data/
+raw_data/
