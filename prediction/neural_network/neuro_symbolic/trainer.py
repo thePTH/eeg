@@ -248,6 +248,7 @@ class NeuroSymbolicDeepEEGTrainer:
                     f"Train loss: {train_metrics['total_loss']:.4f} | "
                     f"Train acc: {train_metrics['accuracy']:.4f}"
                 )
+            writer.flush()
 
         writer.close()
 
