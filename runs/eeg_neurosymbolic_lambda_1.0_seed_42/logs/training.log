@@ -1,11 +1,11 @@
-2026-05-25 14:11:20,892 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | ================================================================================
-2026-05-25 14:11:20,892 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Starting run: eeg_neurosymbolic_lambda_1.0_seed_42
-2026-05-25 14:11:20,893 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Lambda logic: 1.0000
-2026-05-25 14:11:20,893 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | ================================================================================
-2026-05-25 14:11:20,894 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Random seed fixed to 42
-2026-05-25 14:11:20,894 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Using device: cpu
-2026-05-25 14:11:20,894 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Loading dataset
-2026-05-25 14:11:25,066 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Dataset loaded and selected
-2026-05-25 14:11:39,997 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Number of selected rules: 2
-2026-05-25 14:11:40,082 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Dataloaders created
-2026-05-25 14:11:40,085 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Model initialized
+2026-05-26 11:43:10,290 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | ================================================================================
+2026-05-26 11:43:10,290 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Starting run: eeg_neurosymbolic_lambda_1.0_seed_42
+2026-05-26 11:43:10,291 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Lambda logic: 1.0000
+2026-05-26 11:43:10,291 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | ================================================================================
+2026-05-26 11:43:10,292 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Random seed fixed to 42
+2026-05-26 11:43:10,292 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Using device: cpu
+2026-05-26 11:43:10,292 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Loading dataset
+2026-05-26 11:43:14,547 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Dataset loaded and selected
+2026-05-26 11:43:29,599 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Number of selected rules: 2
+2026-05-26 11:43:29,687 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Dataloaders created
+2026-05-26 11:43:29,691 | INFO | eeg_neurosymbolic_lambda_1.0_seed_42 | Model initialized

@@ -26,6 +26,14 @@ def parse_args():
         default=42,
     )
 
+    parser.add_argument(
+        "--split-strategy",
+        type=str,
+        choices=["mtdnet", "random"],
+        default="mtdnet",
+        help="Dataset splitting strategy.",
+    )
+
     return parser.parse_args()
 
 
@@ -36,6 +44,7 @@ def main():
         lambda_logic=args.lambda_logic,
         epochs=args.epochs,
         random_seed=args.seed,
+        split_strategy=args.split_strategy,
     )
 
     runner = EEGExperimentRunner(config)

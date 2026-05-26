@@ -1,4 +1,8 @@
 from dataclasses import dataclass
+from typing import Literal
+
+
+SplitStrategy = Literal["mtdnet", "random"]
 
 
 @dataclass(frozen=True)
@@ -30,14 +34,18 @@ class ExperimentConfig:
         "gamma",
     )
 
+    split_strategy: SplitStrategy = "mtdnet"
+
     test_size: float = 0.2
     val_size: float = 0.3
+
+    mtdnet_dataset_name: str = "miltiadous"
+    mtdnet_task: str = "hc-ad"
 
     n_rules_to_keep: int = 2
 
     batch_size: int = 8
     preprocessing_mode: str = "mtdnet"
-    use_mtdnet_split: bool = True
 
     epochs: int = 50
     lambda_logic: float = 0.0

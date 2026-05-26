@@ -277,7 +277,7 @@ class DifferentiableDecisionRulesFactory:
         trained_tree: TrainedDecisionTree,
         c_tau: float = 0.1,
         min_tau: float = 0.001,
-    ) -> tuple[DifferentiableDecisionRules, TemperatureFeatureMapping]:
+    ) -> tuple[list[DifferentiableDecisionRule], TemperatureFeatureMapping]:
         temperature_feature_mapping = TemperatureFeatureMappingFactory.build(
             trained_tree.dataset,
             c_tau,

@@ -22,8 +22,6 @@ from prediction.neural_network.neuro_symbolic.trainer import (
 )
 from prediction.neural_network.weight_init import EEGWeightInitializer
 
-from rules.factory import NeuroSymbolicRulesExtractorDefaultBuilder
-
 
 class EEGExperimentRunner:
     def __init__(self, config: ExperimentConfig):
@@ -31,6 +29,7 @@ class EEGExperimentRunner:
 
         self.run_name = (
             f"{config.experiment_name}"
+            f"_split_{config.split_strategy}"
             f"_lambda_{config.lambda_logic}"
             f"_seed_{config.random_seed}"
         )
@@ -58,7 +57,10 @@ class EEGExperimentRunner:
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
 
-        file_handler = logging.FileHandler(self.log_dir / "training.log", mode="w")
+        file_handler = logging.FileHandler(
+            self.log_dir / "training.log",
+            mode="w",
+        )
         file_handler.setFormatter(formatter)
 
         logger.addHandler(stream_handler)
@@ -78,6 +80,7 @@ class EEGExperimentRunner:
 
     def get_device(self) -> torch.device:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.logger.info("Using device: %s", device)
 
         if device.type == "cuda":
@@ -106,7 +109,7 @@ class EEGExperimentRunner:
 
         return dataset
 
-    def extract_rules(self, dataset):
+    def build_decision_tree(self) -> DecisionTree:
         decision_tree = DecisionTree(
             parameters=DecisionTreeParameters(
                 criterion="gini",
@@ -116,36 +119,38 @@ class EEGExperimentRunner:
             )
         )
 
-        extractor = NeuroSymbolicRulesExtractorDefaultBuilder.build(
-            default_decision_tree=decision_tree,
-            random_seed=self.config.random_seed,
-            test_size=self.config.test_size,
-            val_size=self.config.val_size,
-        )
+        self.logger.info("Decision tree initialized")
 
-        rules, train_dataset, val_dataset, test_dataset = extractor.extract(dataset)
+        return decision_tree
 
-        rules = rules[: self.config.n_rules_to_keep]
+    def build_dataloaders_and_rules(self, dataset):
+        decision_tree = self.build_decision_tree()
 
-        self.logger.info("Number of selected rules: %d", len(rules))
-
-        return rules, train_dataset, val_dataset, test_dataset
-
-    def build_dataloaders(self, dataset):
         params = NeuroSymbolicEEGDataLoaderParameters(
             batch_size=self.config.batch_size,
             preprocessing_mode=self.config.preprocessing_mode,
-            use_mtdnet_split=self.config.use_mtdnet_split,
+            split_strategy=self.config.split_strategy,
+            random_seed=self.config.random_seed,
+            test_size=self.config.test_size,
+            val_size=self.config.val_size,
+            mtdnet_dataset_name=self.config.mtdnet_dataset_name,
+            mtdnet_task=self.config.mtdnet_task,
+            decision_tree=decision_tree,
         )
 
-        train_loader, val_loader, test_loader = NeuroSymbolicEEGDataloaderFactory.build_all(
-            features_dataset=dataset,
-            params=params,
+        rules, train_loader, val_loader, test_loader = (
+            NeuroSymbolicEEGDataloaderFactory.build_all(
+                features_dataset=dataset,
+                params=params,
+            )
         )
+
+        rules = rules[: self.config.n_rules_to_keep]
 
         self.logger.info("Dataloaders created")
+        self.logger.info("Number of selected rules: %d", len(rules))
 
-        return train_loader, val_loader, test_loader
+        return rules, train_loader, val_loader, test_loader
 
     def build_model(self, device: torch.device):
         model = MultiScaleDeepEEGNet()
@@ -182,6 +187,7 @@ class EEGExperimentRunner:
     def run(self):
         self.logger.info("=" * 80)
         self.logger.info("Starting run: %s", self.run_name)
+        self.logger.info("Split strategy: %s", self.config.split_strategy)
         self.logger.info("Lambda logic: %.4f", self.config.lambda_logic)
         self.logger.info("=" * 80)
 
@@ -190,9 +196,9 @@ class EEGExperimentRunner:
 
         dataset = self.load_dataset()
 
-        rules, train_dataset, val_dataset, test_dataset = self.extract_rules(dataset)
-
-        train_loader, val_loader, test_loader = self.build_dataloaders(dataset)
+        rules, train_loader, val_loader, test_loader = (
+            self.build_dataloaders_and_rules(dataset)
+        )
 
         model = self.build_model(device)
         trainer = self.build_trainer()
