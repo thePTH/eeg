@@ -16,7 +16,7 @@ from prediction.neural_network.neuro_symbolic.logic_loss import (
     ConditionalViolationLossEngine,
 )
 
-
+from sklearn.metrics import balanced_accuracy_score
 @dataclass
 class NeuroSymbolicDeepEEGTrainerParameters:
     epochs: int = 5
@@ -119,12 +119,13 @@ class NeuroSymbolicDeepEEGTrainer:
         running_logic_loss = 0.0
         running_total_loss = 0.0
 
-        running_correct = 0
-        running_total = 0
+        all_y_true = []
+        all_y_pred = []
 
         context = torch.enable_grad() if train else torch.no_grad()
 
         with context:
+
             progress_bar = tqdm(
                 dataloader,
                 desc="Train" if train else "Validation",
@@ -155,23 +156,71 @@ class NeuroSymbolicDeepEEGTrainer:
                 running_logic_loss += logic_loss.item()
                 running_total_loss += total_loss.item()
 
-                running_correct += correct
-                running_total += total
+                # ==========================================================
+                # Predictions / labels for balanced accuracy
+                # ==========================================================
+
+                with torch.no_grad():
+
+                    micro_x_raws_device = micro_x_raws.to(device)
+
+                    micro_x_raws_device = (
+                        micro_x_raws_device
+                        .permute(1, 0, 2, 3)
+                        .contiguous()
+                    )
+
+                    micro_logits = torch.stack(
+                        [
+                            model(micro_x_raw).squeeze(-1)
+                            for micro_x_raw in micro_x_raws_device
+                        ],
+                        dim=0,
+                    )
+
+                    macro_ad_proba = (
+                        MicroLogitsToMacroProbabilityAggregator.compute(
+                            micro_logits,
+                            method=self.params.macro_aggregation_method,
+                        )
+                    )
+
+                    y_pred = (
+                        macro_ad_proba >= self.params.threshold
+                    ).float()
+
+                all_y_true.extend(
+                    y_true.cpu().numpy().tolist()
+                )
+
+                all_y_pred.extend(
+                    y_pred.cpu().numpy().tolist()
+                )
+
+                current_balanced_accuracy = balanced_accuracy_score(
+                    all_y_true,
+                    all_y_pred,
+                )
 
                 n_batches = batch_idx + 1
 
                 progress_bar.set_postfix(
                     total_loss=f"{running_total_loss / n_batches:.4f}",
-                    accuracy=f"{running_correct / running_total:.4f}",
+                    balanced_acc=f"{current_balanced_accuracy:.4f}",
                 )
 
         n_batches = len(dataloader)
+
+        epoch_balanced_accuracy = balanced_accuracy_score(
+            all_y_true,
+            all_y_pred,
+        )
 
         return {
             "supervised_loss": running_supervised_loss / n_batches,
             "logic_loss": running_logic_loss / n_batches,
             "total_loss": running_total_loss / n_batches,
-            "accuracy": running_correct / running_total,
+            "accuracy": epoch_balanced_accuracy,
         }
 
     def train(
