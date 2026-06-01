@@ -1,18 +1,32 @@
-asrpy==0.0.8
-mne==1.11.0
-mne-bids==0.18.0
-mne-connectivity==0.8
+# Core numerical stack
+numpy>=1.26,<3
+scipy>=1.11
+pandas>=2.1
 
-numpy==2.3.0
-scipy==1.17.1
-pandas==3.0.2
-xarray==2026.2.0
-netCDF4==1.7.4
+# EEG / signal processing
+mne>=1.6
+asrpy>=0.0.8
+PyWavelets>=1.5
 
-matplotlib==3.10.8
-pyarrow==23.0.1
-fastparquet==2026.3.0
+# Machine learning / deep learning
+scikit-learn>=1.4
+torch>=2.2
+tensorboard>=2.15
 
-scikit-learn==1.8.0
-tqdm==4.67.3
-requests==2.33.1
+# Statistics
+statsmodels>=0.14
+
+# Plotting / graphs
+matplotlib>=3.8
+networkx>=3.2
+
+# Progress bars
+tqdm>=4.66
+
+# Parquet support for pandas read_parquet/to_parquet
+pyarrow>=15
+fastparquet>=2024.2
+
+# Optional MNE ecosystem packages kept from the original requirements.txt
+mne-bids>=0.15
+mne-connectivity>=0.7

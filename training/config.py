@@ -18,17 +18,7 @@ class ExperimentConfig:
 
     feature_family_names: tuple[str, ...] = (
         "theta_alpha_ratio",
-        "theta_beta_ratio",
-        "gamma_alpha_ratio",
         "spectral_power_ratio",
-        "spectral_centroid",
-        "spectral_spread",
-        "spectral_flux",
-        "spectral_rolloff",
-        "alpha_dominant_frequency",
-        "gamma_dominant_frequency",
-        "relative_wavelet_energy",
-        "relative_wavelet_packet_energy",
         "alpha",
         "beta",
         "gamma",
