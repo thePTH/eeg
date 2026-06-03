@@ -581,4 +581,4 @@ class NeuroSymbolicEEGDataloaderFactory:
             split_mode="test",
         )
 
-        return rules[:2], train_loader, val_loader, test_loader
+        return rules, train_loader, val_loader, test_loader

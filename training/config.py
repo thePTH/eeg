@@ -24,7 +24,7 @@ class ExperimentConfig:
         "gamma",
     )
 
-    split_strategy: SplitStrategy = "mtdnet"
+    split_strategy: SplitStrategy = "random"
 
     test_size: float = 0.2
     val_size: float = 0.3
