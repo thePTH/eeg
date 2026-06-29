@@ -31,6 +31,11 @@ warnings.filterwarnings(
     message="y_pred contains classes not in y_true",
 )
 
+warnings.filterwarnings(
+    "ignore",
+    message="A single label was found in 'y_true' and 'y_pred'.*",
+)
+
 
 @dataclass
 class NeuroSymbolicDeepEEGTrainerParameters:
@@ -45,6 +50,9 @@ class NeuroSymbolicDeepEEGTrainerParameters:
     threshold: float = 0.5
     tensorboard_log_dir: str = "tests/neuro_symbolic_eeg"
 
+    loss_scale_alpha: float = 0.99
+    loss_scale_eps: float = 1e-8
+
 
 class NeuroSymbolicDeepEEGTrainer:
 
@@ -53,6 +61,8 @@ class NeuroSymbolicDeepEEGTrainer:
         params: NeuroSymbolicDeepEEGTrainerParameters,
     ):
         self.params = params
+        self.supervised_loss_scale = None
+        self.logic_loss_scale = None
 
     def _forward_micro_segments(
         self,
@@ -109,6 +119,69 @@ class NeuroSymbolicDeepEEGTrainer:
 
         return logic_loss
 
+    def _update_loss_scales(
+        self,
+        supervised_loss: torch.Tensor,
+        logic_loss: torch.Tensor,
+    ) -> None:
+
+        with torch.no_grad():
+
+            supervised_value = supervised_loss.detach()
+            logic_value = logic_loss.detach()
+
+            if self.supervised_loss_scale is None:
+                self.supervised_loss_scale = supervised_value
+
+            else:
+                self.supervised_loss_scale = (
+                    self.params.loss_scale_alpha
+                    * self.supervised_loss_scale
+                    + (1.0 - self.params.loss_scale_alpha)
+                    * supervised_value
+                )
+
+            if self.logic_loss_scale is None:
+                self.logic_loss_scale = logic_value
+
+            else:
+                self.logic_loss_scale = (
+                    self.params.loss_scale_alpha
+                    * self.logic_loss_scale
+                    + (1.0 - self.params.loss_scale_alpha)
+                    * logic_value
+                )
+
+    def _normalize_logic_loss(
+        self,
+        supervised_loss: torch.Tensor,
+        logic_loss: torch.Tensor,
+        train: bool,
+    ) -> torch.Tensor:
+
+        if train:
+            self._update_loss_scales(
+                supervised_loss=supervised_loss,
+                logic_loss=logic_loss,
+            )
+
+        if self.supervised_loss_scale is None:
+            self.supervised_loss_scale = supervised_loss.detach()
+
+        if self.logic_loss_scale is None:
+            self.logic_loss_scale = logic_loss.detach()
+
+        normalized_logic_loss = (
+            logic_loss
+            * self.supervised_loss_scale
+            / (
+                self.logic_loss_scale
+                + self.params.loss_scale_eps
+            )
+        )
+
+        return normalized_logic_loss
+
     def _compute_batch_outputs(
         self,
         model: nn.Module,
@@ -117,6 +190,7 @@ class NeuroSymbolicDeepEEGTrainer:
         macro_x_feat: torch.Tensor,
         y_true: torch.Tensor,
         device: torch.device,
+        train: bool,
     ) -> dict[str, torch.Tensor | float | int]:
 
         micro_x_raws = micro_x_raws.to(device)
@@ -149,11 +223,17 @@ class NeuroSymbolicDeepEEGTrainer:
             device=device,
         )
 
+        normalized_logic_loss = self._normalize_logic_loss(
+            supervised_loss=supervised_loss,
+            logic_loss=logic_loss,
+            train=train,
+        )
+
         total_loss = (
             (1.0 - self.params.lambda_logic)
             * supervised_loss
             + self.params.lambda_logic
-            * logic_loss
+            * normalized_logic_loss
         )
 
         y_pred = (
@@ -169,6 +249,7 @@ class NeuroSymbolicDeepEEGTrainer:
         return {
             "supervised_loss": supervised_loss,
             "logic_loss": logic_loss,
+            "normalized_logic_loss": normalized_logic_loss,
             "total_loss": total_loss,
             "y_true": y_true.detach().cpu(),
             "y_pred": y_pred.detach().cpu(),
@@ -193,6 +274,7 @@ class NeuroSymbolicDeepEEGTrainer:
 
         running_supervised_loss = 0.0
         running_logic_loss = 0.0
+        running_normalized_logic_loss = 0.0
         running_total_loss = 0.0
 
         running_correct = 0
@@ -230,6 +312,7 @@ class NeuroSymbolicDeepEEGTrainer:
                     macro_x_feat=macro_x_feat,
                     y_true=y_true,
                     device=device,
+                    train=train,
                 )
 
                 total_loss = batch_outputs["total_loss"]
@@ -244,6 +327,10 @@ class NeuroSymbolicDeepEEGTrainer:
 
                 running_logic_loss += (
                     batch_outputs["logic_loss"].item()
+                )
+
+                running_normalized_logic_loss += (
+                    batch_outputs["normalized_logic_loss"].item()
                 )
 
                 running_total_loss += (
@@ -267,19 +354,20 @@ class NeuroSymbolicDeepEEGTrainer:
                     running_correct / running_total
                 )
 
-                current_balanced_accuracy = balanced_accuracy_score(
-                    all_y_true,
-                    all_y_pred,
-                )
-
                 progress_bar.set_postfix(
                     total_loss=(
                         f"{running_total_loss / n_batches:.4f}"
                     ),
-                    acc=f"{standard_accuracy:.4f}",
-                    balanced_acc=(
-                        f"{current_balanced_accuracy:.4f}"
+                    sup_loss=(
+                        f"{running_supervised_loss / n_batches:.4f}"
                     ),
+                    logic_loss=(
+                        f"{running_logic_loss / n_batches:.4f}"
+                    ),
+                    norm_logic=(
+                        f"{running_normalized_logic_loss / n_batches:.4f}"
+                    ),
+                    acc=f"{standard_accuracy:.4f}",
                 )
 
         n_batches = len(dataloader)
@@ -299,6 +387,9 @@ class NeuroSymbolicDeepEEGTrainer:
             ),
             "logic_loss": (
                 running_logic_loss / n_batches
+            ),
+            "normalized_logic_loss": (
+                running_normalized_logic_loss / n_batches
             ),
             "total_loss": (
                 running_total_loss / n_batches
@@ -337,10 +428,12 @@ class NeuroSymbolicDeepEEGTrainer:
         history = {
             "train_supervised_loss": [],
             "train_logic_loss": [],
+            "train_normalized_logic_loss": [],
             "train_total_loss": [],
             "train_accuracy": [],
             "val_supervised_loss": [],
             "val_logic_loss": [],
+            "val_normalized_logic_loss": [],
             "val_total_loss": [],
             "val_accuracy": [],
         }
@@ -400,6 +493,12 @@ class NeuroSymbolicDeepEEGTrainer:
                 print(
                     f"Train loss: "
                     f"{train_metrics['total_loss']:.4f} | "
+                    f"Train sup: "
+                    f"{train_metrics['supervised_loss']:.4f} | "
+                    f"Train logic: "
+                    f"{train_metrics['logic_loss']:.4f} | "
+                    f"Train norm logic: "
+                    f"{train_metrics['normalized_logic_loss']:.4f} | "
                     f"Train acc: "
                     f"{train_metrics['standard_accuracy']:.4f} | "
                     f"Train balanced acc: "
@@ -417,6 +516,12 @@ class NeuroSymbolicDeepEEGTrainer:
                 print(
                     f"Train loss: "
                     f"{train_metrics['total_loss']:.4f} | "
+                    f"Train sup: "
+                    f"{train_metrics['supervised_loss']:.4f} | "
+                    f"Train logic: "
+                    f"{train_metrics['logic_loss']:.4f} | "
+                    f"Train norm logic: "
+                    f"{train_metrics['normalized_logic_loss']:.4f} | "
                     f"Train acc: "
                     f"{train_metrics['standard_accuracy']:.4f} | "
                     f"Train balanced acc: "
@@ -452,6 +557,7 @@ class NeuroSymbolicDeepEEGTrainer:
         all_y_pred = []
 
         running_total_loss = 0.0
+        running_normalized_logic_loss = 0.0
 
         with torch.no_grad():
 
@@ -472,10 +578,17 @@ class NeuroSymbolicDeepEEGTrainer:
                     macro_x_feat=macro_x_feat,
                     y_true=y_true,
                     device=device,
+                    train=False,
                 )
 
                 running_total_loss += (
                     batch_outputs["total_loss"].item()
+                )
+
+                running_normalized_logic_loss += (
+                    batch_outputs[
+                        "normalized_logic_loss"
+                    ].item()
                 )
 
                 all_y_true.extend(
@@ -489,6 +602,9 @@ class NeuroSymbolicDeepEEGTrainer:
         return {
             "test_total_loss": (
                 running_total_loss / len(dataloader)
+            ),
+            "test_normalized_logic_loss": (
+                running_normalized_logic_loss / len(dataloader)
             ),
             "test_balanced_accuracy": balanced_accuracy_score(
                 all_y_true,
