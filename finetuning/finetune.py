@@ -75,8 +75,8 @@ def find_pretrained_model(
     pretrained_dir: Path,
     seed: int,
 ) -> Path:
-    return  pretrained_dir / f"model_{seed}.pt"
-    
+
+    return pretrained_dir / f"model_{seed}.pt"
 
 
 def main():
@@ -102,6 +102,12 @@ def main():
                 pretrained_dir=pretrained_dir,
                 seed=seed,
             )
+
+            if not pretrained_model_path.exists():
+                raise FileNotFoundError(
+                    f"Pretrained model not found: "
+                    f"{pretrained_model_path}"
+                )
 
             config = ExperimentConfig(
                 epochs=args.epochs,
@@ -153,16 +159,13 @@ def main():
 
     csv_path = output_dir / "finetuning_results.csv"
 
-    fieldnames = [
-        "lambda_logic",
-        "seed",
-        "lr",
-        "weight_decay",
-        "pretrained_model_path",
-        "test_total_loss",
-        "test_balanced_accuracy",
-        "test_f1_score",
-    ]
+    fieldnames = sorted(
+        {
+            key
+            for row in all_rows
+            for key in row.keys()
+        }
+    )
 
     with open(
         csv_path,
@@ -181,7 +184,36 @@ def main():
     print("\n" + "=" * 80)
     print("Fine-tuning comparison finished")
     print("=" * 80)
-    print(f"Results saved to: {csv_path}")
+
+    for lambda_logic in args.lambda_logic_values:
+
+        rows = [
+            row
+            for row in all_rows
+            if row["lambda_logic"] == lambda_logic
+        ]
+
+        balanced_accs = [
+            row["test_balanced_accuracy"]
+            for row in rows
+        ]
+
+        f1_scores = [
+            row["test_f1_score"]
+            for row in rows
+        ]
+
+        bal_mean, bal_std = summarize(balanced_accs)
+        f1_mean, f1_std = summarize(f1_scores)
+
+        print(
+            f"lambda={lambda_logic:<5} | "
+            f"balanced_acc={bal_mean:.4f} ± {bal_std:.4f} | "
+            f"f1={f1_mean:.4f} ± {f1_std:.4f}"
+        )
+
+    print(f"\nResults saved to: {csv_path}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

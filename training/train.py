@@ -105,19 +105,21 @@ def main():
 
     csv_path = output_dir / "lambda_logic_comparison.csv"
 
-    fieldnames = [
-        "lambda_logic",
-        "seed",
-        "test_total_loss",
-        "test_balanced_accuracy",
-        "test_f1_score",
-    ]
+    # Détection automatique de toutes les colonnes présentes
+    fieldnames = sorted(
+        {
+            key
+            for row in all_rows
+            for key in row.keys()
+        }
+    )
 
     with open(
         csv_path,
         mode="w",
         newline="",
     ) as file:
+
         writer = csv.DictWriter(
             file,
             fieldnames=fieldnames,
