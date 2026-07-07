@@ -1,0 +1,24 @@
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | ================================================================================
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Starting fine-tuning run
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Run name: eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Pretrained model: pretrained_models/model_45.pt
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Split strategy: random
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Lambda logic: 0.6000
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Learning rate: 1.00e-04
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Weight decay: 1.00e-05
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Epochs: 30
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Seed: 45
+2026-06-30 18:12:30,075 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | ================================================================================
+2026-06-30 18:12:30,078 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Random seed fixed to 45
+2026-06-30 18:12:30,078 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Using device: cpu
+2026-06-30 18:12:30,078 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Loading dataset
+2026-06-30 18:12:33,923 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Dataset loaded and selected
+2026-06-30 18:12:33,924 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Decision tree initialized
+2026-06-30 18:12:34,040 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Dataloaders created
+2026-06-30 18:12:34,040 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Number of selected rules: 2
+2026-06-30 18:12:34,051 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Model initialized
+2026-06-30 18:12:34,054 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Loaded pretrained model from pretrained_models/model_45.pt
+2026-06-30 18:47:54,303 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Model saved to runs/finetuning/eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45/checkpoints/model.pt
+2026-06-30 18:47:54,304 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | History saved to runs/finetuning/eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45/outputs/history.npy
+2026-06-30 18:47:54,304 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Test metrics: {'test_total_loss': 0.6590231731534004, 'test_normalized_logic_loss': 0.7276487930749471, 'test_balanced_accuracy': 0.8243680485338726, 'test_f1_score': 0.8458149779735682}
+2026-06-30 18:47:54,304 | INFO | eeg_neurosymbolic_finetune_split_random_lambda_0.6_lr_0.0001_wd_1e-05_seed_45 | Fine-tuning finished successfully
