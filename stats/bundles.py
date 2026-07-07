@@ -35,24 +35,23 @@ from stats.queries.subject_queries import (
 
 @dataclass(frozen=True, slots=True)
 class SampleBundle(ABC):
-    """
-    Bundle générique d'échantillons prêt à être consommé par un engine statistique.
-    """
+    """Generic sample bundle ready to be consumed by a statistical engine."""
 
     @property
     def n_observations(self) -> int:
+        """Return the number of observations contained in the bundle."""
         raise NotImplementedError
 
     @property
     def label(self) -> str:
+        """Return a human-readable label describing the bundle."""
         raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
 class GroupComparisonSampleBundle(SampleBundle):
-    """
-    Bundle pour une comparaison entre deux groupes.
-    """
+    """Sample bundle for a comparison between two groups."""
+
     x: pd.Series
     y: pd.Series
     x_name: str
@@ -60,26 +59,29 @@ class GroupComparisonSampleBundle(SampleBundle):
 
     @property
     def n_x(self) -> int:
+        """Return the number of observations in the first group."""
         return int(len(self.x))
 
     @property
     def n_y(self) -> int:
+        """Return the number of observations in the second group."""
         return int(len(self.y))
 
     @property
     def n_observations(self) -> int:
+        """Return the total number of observations."""
         return self.n_x + self.n_y
 
     @property
     def label(self) -> str:
+        """Return the group comparison label."""
         return f"{self.x_name} vs {self.y_name}"
 
 
 @dataclass(frozen=True, slots=True)
 class CorrelationSampleBundle(SampleBundle):
-    """
-    Bundle pour une corrélation entre deux variables.
-    """
+    """Sample bundle for a correlation between two variables."""
+
     x: pd.Series
     y: pd.Series
     x_name: str
@@ -87,26 +89,29 @@ class CorrelationSampleBundle(SampleBundle):
 
     @property
     def n_x(self) -> int:
+        """Return the number of observations for the first variable."""
         return int(len(self.x))
 
     @property
     def n_y(self) -> int:
+        """Return the number of observations for the second variable."""
         return int(len(self.y))
 
     @property
     def n_observations(self) -> int:
+        """Return the paired number of observations."""
         return min(self.n_x, self.n_y)
 
     @property
     def label(self) -> str:
+        """Return the correlation label."""
         return f"{self.x_name} vs {self.y_name}"
 
 
 @dataclass(frozen=True, slots=True)
 class OneWayANOVASampleBundle(SampleBundle):
-    """
-    Bundle pour une ANOVA à un facteur.
-    """
+    """Sample bundle for a one-way ANOVA."""
+
     values: pd.Series
     groups: pd.Series
     dependent_name: str
@@ -114,23 +119,29 @@ class OneWayANOVASampleBundle(SampleBundle):
 
     @property
     def n_observations(self) -> int:
+        """Return the number of observations."""
         return int(len(self.values))
 
     @property
     def label(self) -> str:
+        """Return the one-way ANOVA label."""
         return f"{self.dependent_name} ~ {self.factor_name}"
 
     @property
     def group_sizes(self) -> dict[str, int]:
+        """Return the number of observations for each factor level."""
         grouped = self.groups.astype(str).value_counts(sort=False)
-        return {str(level): int(count) for level, count in grouped.items()}
+
+        return {
+            str(level): int(count)
+            for level, count in grouped.items()
+        }
 
 
 @dataclass(frozen=True, slots=True)
 class TwoWayANOVASampleBundle(SampleBundle):
-    """
-    Bundle pour une ANOVA à deux facteurs.
-    """
+    """Sample bundle for a two-way ANOVA."""
+
     dataframe: pd.DataFrame
     dependent_name: str
     factor_a_name: str
@@ -138,20 +149,31 @@ class TwoWayANOVASampleBundle(SampleBundle):
 
     @property
     def n_observations(self) -> int:
+        """Return the number of observations."""
         return int(len(self.dataframe))
 
     @property
     def label(self) -> str:
+        """Return the two-way ANOVA label."""
         return f"{self.dependent_name} ~ {self.factor_a_name} * {self.factor_b_name}"
 
     @property
     def cell_sizes(self) -> dict[str, int]:
+        """Return the number of observations for each factor-level cell."""
         grouped = (
             self.dataframe
-            .groupby([self.factor_a_name, self.factor_b_name], dropna=False, observed=False)
+            .groupby(
+                [self.factor_a_name, self.factor_b_name],
+                dropna=False,
+                observed=False,
+            )
             .size()
         )
-        return {f"{str(a)}__{str(b)}": int(n) for (a, b), n in grouped.items()}
+
+        return {
+            f"{str(a)}__{str(b)}": int(n)
+            for (a, b), n in grouped.items()
+        }
 
 
 # ======================================================================================
@@ -160,15 +182,10 @@ class TwoWayANOVASampleBundle(SampleBundle):
 
 class SampleBundleFactory:
     """
-    Factory qui transforme :
-    - une query métier
-    - un FeaturesDataset
-    en bundle prêt pour un engine statistique.
+    Factory converting a statistical query and a FeaturesDataset into a sample bundle.
 
-    Philosophie
-    -----------
-    Cette factory ne reconstruit pas les données métier.
-    Elle s'appuie sur les vues déjà exposées par `FeaturesDataset` :
+    This factory does not reconstruct domain-level data. It relies on views
+    already exposed by `FeaturesDataset`:
     - dataset.subject_dataframe
     - dataset.long_dataframe
     - dataset.long_psd_dataframe
@@ -176,15 +193,15 @@ class SampleBundleFactory:
     """
 
     # ------------------------------------------------------------------
-    # public API
+    # Public API
     # ------------------------------------------------------------------
 
     @staticmethod
     def list_keys(query: StatisticalQuery, dataset: Any) -> list[str]:
         """
-        Retourne les clés statistiques à itérer pour la query.
+        Return the statistical keys to iterate over for a query.
 
-        Exemples
+        Examples
         --------
         - ["subject_level"]
         - ["Fp1", "Fp2", ...]
@@ -273,57 +290,100 @@ class SampleBundleFactory:
 
     @staticmethod
     def build(query: StatisticalQuery, dataset: Any, key: str) -> SampleBundle:
-        """
-        Construit le bundle associé à une query et une clé.
-        """
+        """Build the sample bundle associated with a query and a key."""
         match query:
             # ==========================================================
             # SUBJECT
             # ==========================================================
             case SubjectGroupComparisonQuery():
-                return SampleBundleFactory._build_subject_group_comparison_bundle(query, dataset)
+                return SampleBundleFactory._build_subject_group_comparison_bundle(
+                    query,
+                    dataset,
+                )
 
             case SubjectCorrelationQuery():
-                return SampleBundleFactory._build_subject_correlation_bundle(query, dataset)
+                return SampleBundleFactory._build_subject_correlation_bundle(
+                    query,
+                    dataset,
+                )
 
             case SubjectFactorialQuery():
-                return SampleBundleFactory._build_subject_factorial_bundle(query, dataset)
+                return SampleBundleFactory._build_subject_factorial_bundle(
+                    query,
+                    dataset,
+                )
 
             # ==========================================================
             # EEG FEATURES
             # ==========================================================
             case EEGFeatureGroupComparisonQuery():
-                return SampleBundleFactory._build_eeg_group_comparison_bundle(query, dataset, key)
+                return SampleBundleFactory._build_eeg_group_comparison_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case EEGFeatureCorrelationQuery():
-                return SampleBundleFactory._build_eeg_correlation_bundle(query, dataset, key)
+                return SampleBundleFactory._build_eeg_correlation_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case EEGFeatureFactorialQuery():
-                return SampleBundleFactory._build_eeg_factorial_bundle(query, dataset, key)
+                return SampleBundleFactory._build_eeg_factorial_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             # ==========================================================
             # PSD
             # ==========================================================
             case PSDBandGroupComparisonQuery():
-                return SampleBundleFactory._build_psd_group_comparison_bundle(query, dataset, key)
+                return SampleBundleFactory._build_psd_group_comparison_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case PSDBandCorrelationQuery():
-                return SampleBundleFactory._build_psd_correlation_bundle(query, dataset, key)
+                return SampleBundleFactory._build_psd_correlation_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case PSDBandFactorialQuery():
-                return SampleBundleFactory._build_psd_factorial_bundle(query, dataset, key)
+                return SampleBundleFactory._build_psd_factorial_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             # ==========================================================
             # PPC
             # ==========================================================
             case PPCBandGroupComparisonQuery():
-                return SampleBundleFactory._build_ppc_group_comparison_bundle(query, dataset, key)
+                return SampleBundleFactory._build_ppc_group_comparison_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case PPCBandCorrelationQuery():
-                return SampleBundleFactory._build_ppc_correlation_bundle(query, dataset, key)
+                return SampleBundleFactory._build_ppc_correlation_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case PPCBandFactorialQuery():
-                return SampleBundleFactory._build_ppc_factorial_bundle(query, dataset, key)
+                return SampleBundleFactory._build_ppc_factorial_bundle(
+                    query,
+                    dataset,
+                    key,
+                )
 
             case _:
                 raise ValueError(
@@ -331,12 +391,18 @@ class SampleBundleFactory:
                 )
 
     # ------------------------------------------------------------------
-    # generic helpers
+    # Generic helpers
     # ------------------------------------------------------------------
 
     @staticmethod
     def _require_columns(df: pd.DataFrame, columns: list[str], *, context: str) -> None:
-        missing = [col for col in columns if col not in df.columns]
+        """Ensure that all required columns are available in a DataFrame."""
+        missing = [
+            col
+            for col in columns
+            if col not in df.columns
+        ]
+
         if missing:
             raise KeyError(
                 f"Missing required columns {missing} in {context}. "
@@ -351,15 +417,15 @@ class SampleBundleFactory:
         columns: list[str],
     ) -> pd.DataFrame:
         """
-        Sélectionne éventuellement un sous-ensemble de lignes puis garde
-        uniquement les colonnes utiles avant `dropna()`.
+        Select an optional row subset and keep only useful columns before dropna.
 
-        Cela réduit la mémoire temporaire et accélère les traitements.
+        This reduces temporary memory usage and speeds up processing.
         """
         if mask is not None:
             df = df.loc[mask, columns]
         else:
             df = df.loc[:, columns]
+
         return df.dropna()
 
     @staticmethod
@@ -371,8 +437,7 @@ class SampleBundleFactory:
         dependent_name: str,
     ) -> SampleBundle:
         """
-        Construit automatiquement un bundle one-way ou two-way ANOVA
-        à partir d'un DataFrame long déjà préparé.
+        Automatically build a one-way or two-way ANOVA bundle from a long DataFrame.
         """
         SampleBundleFactory._require_columns(
             df,
@@ -434,9 +499,7 @@ class SampleBundleFactory:
         y_name: str,
         error_context: str,
     ) -> GroupComparisonSampleBundle:
-        """
-        Helper générique pour construire un bundle de comparaison de groupes.
-        """
+        """Build a generic group-comparison sample bundle."""
         SampleBundleFactory._require_columns(
             df,
             [value_col, group_col],
@@ -477,9 +540,7 @@ class SampleBundleFactory:
         y_name: str,
         error_context: str,
     ) -> CorrelationSampleBundle:
-        """
-        Helper générique pour construire un bundle de corrélation.
-        """
+        """Build a generic correlation sample bundle."""
         SampleBundleFactory._require_columns(
             df,
             [x_col, y_col],
@@ -502,7 +563,7 @@ class SampleBundleFactory:
         )
 
     # ------------------------------------------------------------------
-    # subject bundles
+    # Subject bundles
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -510,6 +571,7 @@ class SampleBundleFactory:
         query: SubjectGroupComparisonQuery,
         dataset: Any,
     ) -> GroupComparisonSampleBundle:
+        """Build a subject-level group-comparison bundle."""
         df = dataset.subject_dataframe
 
         return SampleBundleFactory._build_group_comparison_bundle_from_dataframe(
@@ -520,9 +582,7 @@ class SampleBundleFactory:
             group_b=query.group_b,
             x_name=f"{query.variable} ({query.group_a})",
             y_name=f"{query.variable} ({query.group_b})",
-            error_context=(
-                f"subject-level comparison for variable='{query.variable}'"
-            ),
+            error_context=f"subject-level comparison for variable='{query.variable}'",
         )
 
     @staticmethod
@@ -530,6 +590,7 @@ class SampleBundleFactory:
         query: SubjectCorrelationQuery,
         dataset: Any,
     ) -> CorrelationSampleBundle:
+        """Build a subject-level correlation bundle."""
         df = dataset.subject_dataframe
 
         return SampleBundleFactory._build_correlation_bundle_from_dataframe(
@@ -548,6 +609,7 @@ class SampleBundleFactory:
         query: SubjectFactorialQuery,
         dataset: Any,
     ) -> SampleBundle:
+        """Build a subject-level factorial-analysis bundle."""
         df = dataset.subject_dataframe
 
         return SampleBundleFactory._build_factorial_bundle_from_dataframe(
@@ -567,6 +629,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
+        """Build an EEG-feature group-comparison bundle."""
         df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
@@ -611,6 +674,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
+        """Build an EEG-feature correlation bundle."""
         df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
@@ -645,6 +709,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
+        """Build an EEG-feature factorial-analysis bundle."""
         df = dataset.long_dataframe
 
         SampleBundleFactory._require_columns(
@@ -673,6 +738,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
+        """Build a PSD-band group-comparison bundle."""
         df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
@@ -717,6 +783,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
+        """Build a PSD-band correlation bundle."""
         df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
@@ -751,6 +818,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
+        """Build a PSD-band factorial-analysis bundle."""
         df = dataset.long_psd_dataframe
 
         SampleBundleFactory._require_columns(
@@ -779,6 +847,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> GroupComparisonSampleBundle:
+        """Build a PPC-band group-comparison bundle."""
         df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(
@@ -823,6 +892,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> CorrelationSampleBundle:
+        """Build a PPC-band correlation bundle."""
         df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(
@@ -857,6 +927,7 @@ class SampleBundleFactory:
         dataset: Any,
         key: str,
     ) -> SampleBundle:
+        """Build a PPC-band factorial-analysis bundle."""
         df = dataset.long_ppc_dataframe
 
         SampleBundleFactory._require_columns(

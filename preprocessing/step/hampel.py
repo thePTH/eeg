@@ -10,16 +10,21 @@ from preprocessing.step.base import PreprocessingStep
 
 class HampelFilterStep(PreprocessingStep):
     """
-    Hampel filter rapide avec :
-    - coeur du signal traité via scipy.ndimage.median_filter
-    - bords corrigés exactement avec fenêtre tronquée
+    Fast Hampel filtering preprocessing step.
+
+    Implementation details
+    ----------------------
+    - The signal core is processed with ``scipy.ndimage.median_filter``.
+    - Signal borders are corrected exactly with truncated windows.
     """
 
     def __init__(self, window_size: int = 2001, n_sigma: float = 3.0):
         if window_size < 1:
             raise ValueError("window_size must be >= 1")
+
         if window_size % 2 == 0:
             raise ValueError("window_size must be odd")
+
         if n_sigma <= 0:
             raise ValueError("n_sigma must be > 0")
 
@@ -28,10 +33,12 @@ class HampelFilterStep(PreprocessingStep):
 
     @property
     def name(self) -> str:
+        """Return the preprocessing step name."""
         return "hampel_filter"
 
     @property
     def params(self) -> dict:
+        """Return the Hampel filter parameters."""
         return {
             "window_size": self._window_size,
             "n_sigma": self._n_sigma,
@@ -43,16 +50,20 @@ class HampelFilterStep(PreprocessingStep):
         med: np.ndarray,
         half_window: int,
     ) -> None:
+        """Correct border medians using truncated windows."""
         n = x.size
+
         if n == 0:
             return
 
         left_stop = min(half_window, n)
+
         for i in range(left_stop):
             right = min(n, i + half_window + 1)
             med[i] = np.median(x[:right])
 
         right_start = max(left_stop, n - half_window)
+
         for i in range(right_start, n):
             left = max(0, i - half_window)
             med[i] = np.median(x[left:])
@@ -64,17 +75,21 @@ class HampelFilterStep(PreprocessingStep):
         mad: np.ndarray,
         half_window: int,
     ) -> None:
+        """Correct border median absolute deviations using truncated windows."""
         n = x.size
+
         if n == 0:
             return
 
         left_stop = min(half_window, n)
+
         for i in range(left_stop):
             right = min(n, i + half_window + 1)
             window = x[:right]
             mad[i] = np.median(np.abs(window - med[i]))
 
         right_start = max(left_stop, n - half_window)
+
         for i in range(right_start, n):
             left = max(0, i - half_window)
             window = x[left:]
@@ -82,6 +97,7 @@ class HampelFilterStep(PreprocessingStep):
 
     @staticmethod
     def _hampel_1d(x: np.ndarray, window_size: int, n_sigma: float) -> np.ndarray:
+        """Apply Hampel filtering to a one-dimensional signal."""
         x = np.asarray(x, dtype=np.float64)
         n = x.size
 
@@ -93,6 +109,7 @@ class HampelFilterStep(PreprocessingStep):
 
         if n <= window_size:
             y = x.copy()
+
             for i in range(n):
                 left = max(0, i - half_window)
                 right = min(n, i + half_window + 1)
@@ -104,6 +121,7 @@ class HampelFilterStep(PreprocessingStep):
 
                 if abs(x[i] - med) > n_sigma * sigma:
                     y[i] = med
+
             return y
 
         med = scipy.ndimage.median_filter(
@@ -131,6 +149,7 @@ class HampelFilterStep(PreprocessingStep):
 
         y = x.copy()
         y[mask] = med[mask]
+
         return y
 
     def transform_raw(
@@ -139,6 +158,7 @@ class HampelFilterStep(PreprocessingStep):
         *,
         eeg_data: EEGData | None = None,
     ) -> mne.io.Raw:
+        """Apply Hampel filtering to each channel of an MNE Raw object."""
         if not raw.preload:
             raw.load_data(verbose=False)
 

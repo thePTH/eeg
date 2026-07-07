@@ -10,22 +10,27 @@ from preprocessing.step.base import PreprocessingStep
 
 class DetrendStep(PreprocessingStep):
     """
-    Detrend global.
-    - order=0 : suppression de la composante constante
-    - order=1 : detrend linéaire global
+    Global detrending preprocessing step.
+
+    Supported orders:
+    - order=0: remove the constant component;
+    - order=1: remove a global linear trend.
     """
 
     def __init__(self, order: int):
         if order not in (0, 1):
             raise ValueError("order must be 0 or 1")
+
         self._order = order
 
     @property
     def name(self) -> str:
+        """Return the preprocessing step name."""
         return "detrend"
 
     @property
     def params(self) -> dict:
+        """Return the detrending parameters."""
         return {"order": self._order}
 
     def transform_raw(
@@ -34,6 +39,7 @@ class DetrendStep(PreprocessingStep):
         *,
         eeg_data: EEGData | None = None,
     ) -> mne.io.Raw:
+        """Apply global detrending to each channel of an MNE Raw object."""
         detrend_type = "constant" if self._order == 0 else "linear"
 
         raw.apply_function(
@@ -50,17 +56,19 @@ class DetrendStep(PreprocessingStep):
 
 class LocalDetrendStep(PreprocessingStep):
     """
-    Local detrending inspiré de locdetrend.
+    Local detrending preprocessing step inspired by locdetrend.
 
-    L'idée est de retirer une tendance affine locale estimée sur des fenêtres
-    glissantes qui se recouvrent.
+    The idea is to remove a local affine trend estimated on overlapping
+    sliding windows.
     """
 
     def __init__(self, window_sec: float = 0.06, step_sec: float = 0.015):
         if window_sec <= 0:
             raise ValueError("window_sec must be > 0")
+
         if step_sec <= 0:
             raise ValueError("step_sec must be > 0")
+
         if step_sec > window_sec:
             raise ValueError("step_sec must be <= window_sec")
 
@@ -69,10 +77,12 @@ class LocalDetrendStep(PreprocessingStep):
 
     @property
     def name(self) -> str:
+        """Return the preprocessing step name."""
         return "local_detrend"
 
     @property
     def params(self) -> dict:
+        """Return the local detrending parameters."""
         return {
             "window_sec": self._window_sec,
             "step_sec": self._step_sec,
@@ -85,6 +95,7 @@ class LocalDetrendStep(PreprocessingStep):
         window_sec: float,
         step_sec: float,
     ) -> np.ndarray:
+        """Apply local detrending to a one-dimensional signal."""
         x = np.asarray(x, dtype=np.float64)
         n = x.size
 
@@ -98,6 +109,7 @@ class LocalDetrendStep(PreprocessingStep):
             return scipy.signal.detrend(x, type="linear")
 
         starts = np.arange(0, n - window + 1, step, dtype=np.int64)
+
         if starts[-1] != n - window:
             starts = np.append(starts, n - window)
 
@@ -165,6 +177,7 @@ class LocalDetrendStep(PreprocessingStep):
         *,
         eeg_data: EEGData | None = None,
     ) -> mne.io.Raw:
+        """Apply local detrending to each channel of an MNE Raw object."""
         fs = float(raw.info["sfreq"])
 
         raw.apply_function(

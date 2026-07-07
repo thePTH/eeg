@@ -6,72 +6,60 @@ import torch.nn.functional as F
 
 class MicroLogitsToMacroProbabilityAggregator:
     """
-    Agrège des logits micro en une probabilité macro.
+    Aggregate micro-level logits into macro-level probabilities.
 
-    Hypothèses
-    ----------
-    micro_logits.shape = [S, B]
+    Assumptions
+    -----------
+    micro_logits
+        Tensor with shape ``[S, B]``, where:
+        - ``S`` is the number of micro-segments,
+        - ``B`` is the batch size.
 
-    avec :
-        S = nombre de micro-segments
-        B = batch size
-
-    Retour
-    ------
-    macro_proba.shape = [B]
+    Returns
+    -------
+    torch.Tensor
+        Macro-level probability tensor with shape ``[B]``.
     """
 
     @staticmethod
     def compute(
         micro_logits: torch.Tensor,
         method: str = "mean_logit",
-        
     ) -> torch.Tensor:
         """
+        Aggregate micro logits.
+
         Parameters
         ----------
-        micro_logits:
-            Tensor de shape [S, B]
-
-        method:
-            Méthode d'agrégation parmi :
-            - "mean_logit"
-            - "mean_probability"
-            - "max_probability"
-            
-
+        micro_logits
+            Tensor with shape ``[S, B]``.
+        method
+            Aggregation method. Supported values are:
+            - ``"mean_logit"``
+            - ``"mean_probability"``
+            - ``"max_probability"``
 
         Returns
         -------
-        Tensor [B]
+        torch.Tensor
+            Tensor with shape ``[B]``.
         """
-
-
-
-        # ==========================================================
-        # 1. Mean of logits
-        # ==========================================================
         if method == "mean_logit":
             macro_logits = micro_logits.mean(dim=0)
             return torch.sigmoid(macro_logits)
 
-        # ==========================================================
-        # 2. Mean of probabilities
-        # ==========================================================
         elif method == "mean_probability":
             micro_proba = torch.sigmoid(micro_logits)
             return micro_proba.mean(dim=0)
 
-        # ==========================================================
-        # 3. Max probability
-        # ==========================================================
         elif method == "max_probability":
             micro_proba = torch.sigmoid(micro_logits)
             return micro_proba.max(dim=0).values
 
 
-
 class MicroLogitsSupervisedLossAggregator:
+    """Aggregate supervised losses from micro-level logits."""
+
     @staticmethod
     def compute(
         micro_logits: torch.Tensor,
@@ -79,7 +67,28 @@ class MicroLogitsSupervisedLossAggregator:
         method: str = "macro_bce",
         macro_aggregation_method: str = "mean_logit",
     ) -> torch.Tensor:
+        """
+        Compute supervised binary classification loss from micro logits.
 
+        Parameters
+        ----------
+        micro_logits
+            Tensor with shape ``[S, B]``.
+        y_true
+            Ground-truth macro labels with shape ``[B]``.
+        method
+            Loss aggregation method. Supported values are:
+            - ``"micro_bce"``
+            - ``"macro_bce"``
+        macro_aggregation_method
+            Macro aggregation strategy used when ``method="macro_bce"`` and
+            probabilities must be computed before applying BCE.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar supervised loss.
+        """
         if micro_logits.ndim != 2:
             raise ValueError(
                 f"micro_logits must have shape [S, B]. Got {micro_logits.shape}."

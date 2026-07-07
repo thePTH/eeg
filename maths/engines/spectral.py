@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-import matplotlib.pyplot as plt
 
 
 class SpectralTools:
-    """Outils spectraux de bas niveau."""
+    """Low-level spectral utility methods."""
 
     @staticmethod
-    def bandpower_from_psd(freqs: np.ndarray, psd: np.ndarray, band: tuple[float, float]) -> float:
+    def bandpower_from_psd(
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        band: tuple[float, float],
+    ) -> float:
+        """Compute the power contained in a frequency band from a PSD."""
         lo, hi = band
         mask = (freqs >= lo) & (freqs <= hi)
 
@@ -21,6 +27,8 @@ class SpectralTools:
 
 
 class PSDAnalysisResult:
+    """Store a power spectral density and its associated frequencies."""
+
     def __init__(self, psd: np.ndarray, freqs: np.ndarray):
         self.psd = psd
         self.freqs = freqs
@@ -32,6 +40,7 @@ class PSDAnalysisResult:
         title: str = "Power Spectral Density",
         show: bool = True,
     ):
+        """Plot the power spectral density."""
         psd = self.psd.copy()
 
         if db:
@@ -52,13 +61,18 @@ class PSDAnalysisResult:
         if show:
             plt.show()
 
-
     def to_dict(self) -> dict[float, float]:
-        return {freq : power for freq, power in zip(self.freqs, self.psd)}
+        """Convert the PSD result to a frequency-to-power dictionary."""
+        return {
+            freq: power
+            for freq, power in zip(self.freqs, self.psd)
+        }
 
 
 @dataclass(slots=True, frozen=True)
 class SignalSpectralAnalysisResult:
+    """Container for all spectral analysis results computed from one signal."""
+
     freqs: np.ndarray
     psd: np.ndarray
     fft_freqs: np.ndarray
@@ -95,11 +109,14 @@ class SignalSpectralAnalysisResult:
 
     @property
     def psd_analysis_result(self):
+        """Return the PSD analysis result object."""
         return PSDAnalysisResult(self.psd, self.freqs)
 
 
 @dataclass(slots=True, frozen=True)
 class SignalSpectralAnalysisParameters:
+    """Parameters used by the spectral analysis engine."""
+
     bands: dict[str, tuple[float, float]]
     spectral_flux_segment_sec: float
     psd_time_halfbandwidth_product: float
@@ -107,26 +124,34 @@ class SignalSpectralAnalysisParameters:
 
 class SignalSpectralAnalysisEngine:
     """
-    Moteur de calcul de l'analyse spectrale.
+    Engine used to compute spectral features.
 
-    Philosophie de cette version :
-    - PSD multi-taper conservée pour les mesures PSD/globales
-    - voie séparée dédiée aux power ratios pour se rapprocher davantage
-      de la logique du papier tout en gardant TES bandes fréquentielles
+    This version follows a two-path strategy:
+    - multi-taper PSD is kept for PSD-based and global spectral measures;
+    - a separate spectrum is used for power ratios, closer to the reference
+      paper logic while keeping the configured frequency bands.
     """
 
-    def __init__(self, x: np.ndarray, fs: float, params: SignalSpectralAnalysisParameters):
+    def __init__(
+        self,
+        x: np.ndarray,
+        fs: float,
+        params: SignalSpectralAnalysisParameters,
+    ):
         self.x = np.asarray(x, dtype=float)
         self.fs = float(fs)
         self.params = params
 
         if self.fs <= 0:
             raise ValueError("La fréquence d'échantillonnage doit être > 0.")
+
         if self.x.ndim != 1:
             raise ValueError("Le signal doit être 1D.")
 
     def _compute_psd_multitaper(self) -> tuple[np.ndarray, np.ndarray]:
+        """Compute the one-sided multi-taper power spectral density."""
         n = len(self.x)
+
         if n == 0:
             return np.asarray([], dtype=float), np.asarray([], dtype=float)
 
@@ -148,6 +173,7 @@ class SignalSpectralAnalysisEngine:
         freqs = np.fft.rfftfreq(n, d=1.0 / self.fs)
 
         taper_energy = np.sum(taper ** 2)
+
         if taper_energy <= 0.0:
             return freqs, np.zeros_like(freqs, dtype=float)
 
@@ -164,21 +190,35 @@ class SignalSpectralAnalysisEngine:
         return freqs, psd
 
     def _compute_fft(self) -> tuple[np.ndarray, np.ndarray]:
+        """Compute the one-sided FFT magnitude spectrum."""
         n = len(self.x)
+
         if n == 0:
             return np.asarray([], dtype=float), np.asarray([], dtype=float)
 
         freqs = np.fft.rfftfreq(n, d=1.0 / self.fs)
         mag = np.abs(np.fft.rfft(self.x))
+
         return freqs, mag
 
-    def _compute_band_powers(self, freqs: np.ndarray, psd: np.ndarray) -> dict[str, float]:
+    def _compute_band_powers(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+    ) -> dict[str, float]:
+        """Compute PSD-based power for each configured frequency band."""
         return {
             name: SpectralTools.bandpower_from_psd(freqs, psd, band)
             for name, band in self.params.bands.items()
         }
 
-    def _compute_total_power(self, freqs: np.ndarray, psd: np.ndarray, band_powers: dict[str, float]) -> float:
+    def _compute_total_power(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        band_powers: dict[str, float],
+    ) -> float:
+        """Compute total signal power from the full band or from the PSD."""
         if "full" in band_powers:
             return float(band_powers["full"])
 
@@ -192,8 +232,12 @@ class SignalSpectralAnalysisEngine:
         band_powers: dict[str, float],
         total_power: float,
     ) -> dict[str, float]:
+        """Compute each band power relative to the total power."""
         if total_power <= 0.0:
-            return {name: 0.0 for name in band_powers}
+            return {
+                name: 0.0
+                for name in band_powers
+            }
 
         return {
             name: float(power / total_power)
@@ -201,26 +245,33 @@ class SignalSpectralAnalysisEngine:
         }
 
     def _get_band_power(self, band_powers: dict[str, float], band_name: str) -> float:
+        """Return one band power, or zero if the band is missing."""
         return float(band_powers.get(band_name, 0.0))
 
     def _safe_ratio(self, numerator: float, denominator: float) -> float:
+        """Compute a ratio while avoiding division by zero."""
         if denominator == 0.0:
             return 0.0
+
         return float(numerator / denominator)
 
     def _next_pow2(self, n: int) -> int:
+        """Return the next power of two greater than or equal to ``n``."""
         if n <= 1:
             return 1
+
         return 2 ** int(np.ceil(np.log2(n)))
 
     def _compute_ratio_spectrum(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Voie spectrale dédiée aux power ratios :
-        - retrait de moyenne
-        - fenêtre de Hamming
-        - zero-padding à la prochaine puissance de 2
-        - rFFT
-        - puissance one-sided |X(f)|^2
+        Compute the spectrum dedicated to power ratios.
+
+        Processing steps:
+        - mean removal;
+        - Hamming windowing;
+        - zero-padding to the next power of two;
+        - real FFT;
+        - one-sided power spectrum |X(f)|².
         """
         x = np.asarray(self.x, dtype=float)
         n = len(x)
@@ -246,6 +297,7 @@ class SignalSpectralAnalysisEngine:
         power: np.ndarray,
         band: tuple[float, float],
     ) -> float:
+        """Compute band power by summing a generic power spectrum."""
         lo, hi = band
         mask = (freqs >= lo) & (freqs <= hi)
 
@@ -261,75 +313,111 @@ class SignalSpectralAnalysisEngine:
         low: float,
         high: float,
     ) -> float:
+        """Compute the dominant frequency inside a frequency interval."""
         if fft_freqs.size == 0 or fft_magnitude.size == 0:
             return 0.0
 
         mask = (fft_freqs >= low) & (fft_freqs <= high)
+
         if not np.any(mask):
             return 0.0
 
         sub_f = fft_freqs[mask]
         sub_m = fft_magnitude[mask]
+
         return float(sub_f[np.argmax(sub_m)])
 
     def _compute_centroid(self, freqs: np.ndarray, psd: np.ndarray) -> float:
+        """Compute the spectral centroid."""
         if freqs.size == 0 or psd.size == 0:
             return 0.0
 
         denom = np.sum(psd)
+
         if denom <= 0.0:
             return 0.0
 
         return float(np.sum(freqs * psd) / denom)
 
-    def _compute_spread(self, freqs: np.ndarray, psd: np.ndarray, centroid: float) -> float:
+    def _compute_spread(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        centroid: float,
+    ) -> float:
+        """Compute the spectral spread around the centroid."""
         if freqs.size == 0 or psd.size == 0:
             return 0.0
 
         denom = np.sum(psd)
+
         if denom <= 0.0:
             return 0.0
 
         var = np.sum(psd * (freqs - centroid) ** 2) / denom
+
         return float(np.sqrt(max(var, 0.0)))
 
-    def _compute_skewness(self, freqs: np.ndarray, psd: np.ndarray, centroid: float, spread: float) -> float:
+    def _compute_skewness(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        centroid: float,
+        spread: float,
+    ) -> float:
+        """Compute spectral skewness."""
         if freqs.size == 0 or psd.size == 0:
             return 0.0
 
         denom = np.sum(psd)
+
         if denom <= 0.0 or spread <= 0.0:
             return 0.0
 
         m3 = np.sum(psd * (freqs - centroid) ** 3) / denom
+
         return float(m3 / (spread ** 3))
 
-    def _compute_kurtosis(self, freqs: np.ndarray, psd: np.ndarray, centroid: float, spread: float) -> float:
+    def _compute_kurtosis(
+        self,
+        freqs: np.ndarray,
+        psd: np.ndarray,
+        centroid: float,
+        spread: float,
+    ) -> float:
+        """Compute spectral kurtosis."""
         if freqs.size == 0 or psd.size == 0:
             return 0.0
 
         denom = np.sum(psd)
+
         if denom <= 0.0 or spread <= 0.0:
             return 0.0
 
         m4 = np.sum(psd * (freqs - centroid) ** 4) / denom
+
         return float(m4 / (spread ** 4))
 
     def _compute_rolloff_95(self, freqs: np.ndarray, psd: np.ndarray) -> float:
+        """Compute the 95 percent spectral rolloff frequency."""
         if freqs.size == 0 or psd.size == 0:
             return 0.0
 
         cumulative = np.cumsum(psd)
+
         if cumulative.size == 0 or cumulative[-1] <= 0:
             return 0.0
 
         threshold = 0.95 * cumulative[-1]
         idx = np.searchsorted(cumulative, threshold)
         idx = min(idx, len(freqs) - 1)
+
         return float(freqs[idx])
 
     def _compute_flux(self) -> float:
+        """Compute spectral flux from consecutive FFT magnitude segments."""
         n = len(self.x)
+
         if n < 2:
             return 0.0
 
@@ -343,16 +431,20 @@ class SignalSpectralAnalysisEngine:
         mags = np.abs(np.fft.rfft(segments, axis=1))
         diffs = np.diff(mags, axis=0)
         flux = np.mean(np.sum(diffs ** 2, axis=1))
+
         return float(flux)
 
     def compute(self) -> SignalSpectralAnalysisResult:
+        """Compute all spectral analysis features."""
         freqs, psd = self._compute_psd_multitaper()
         fft_freqs, fft_magnitude = self._compute_fft()
 
-        # Sorties PSD classiques conservées
         band_powers = self._compute_band_powers(freqs, psd)
         total_power = self._compute_total_power(freqs, psd, band_powers)
-        relative_band_powers = self._compute_relative_band_powers(band_powers, total_power)
+        relative_band_powers = self._compute_relative_band_powers(
+            band_powers,
+            total_power,
+        )
 
         delta_power = self._get_band_power(band_powers, "delta")
         theta_power = self._get_band_power(band_powers, "theta")
@@ -360,31 +452,38 @@ class SignalSpectralAnalysisEngine:
         beta_power = self._get_band_power(band_powers, "beta")
         gamma_power = self._get_band_power(band_powers, "gamma")
 
-        # Nouvelle voie dédiée aux ratios
         ratio_freqs, ratio_power = self._compute_ratio_spectrum()
 
         delta_ratio_power = self._band_power_from_spectrum(
-            ratio_freqs, ratio_power, self.params.bands["delta"]
+            ratio_freqs,
+            ratio_power,
+            self.params.bands["delta"],
         )
         theta_ratio_power = self._band_power_from_spectrum(
-            ratio_freqs, ratio_power, self.params.bands["theta"]
+            ratio_freqs,
+            ratio_power,
+            self.params.bands["theta"],
         )
         alpha_ratio_power = self._band_power_from_spectrum(
-            ratio_freqs, ratio_power, self.params.bands["alpha"]
+            ratio_freqs,
+            ratio_power,
+            self.params.bands["alpha"],
         )
         beta_ratio_power = self._band_power_from_spectrum(
-            ratio_freqs, ratio_power, self.params.bands["beta"]
+            ratio_freqs,
+            ratio_power,
+            self.params.bands["beta"],
         )
         gamma_ratio_power = self._band_power_from_spectrum(
-            ratio_freqs, ratio_power, self.params.bands["gamma"]
+            ratio_freqs,
+            ratio_power,
+            self.params.bands["gamma"],
         )
 
         theta_beta_ratio = self._safe_ratio(theta_ratio_power, beta_ratio_power)
         theta_alpha_ratio = self._safe_ratio(theta_ratio_power, alpha_ratio_power)
         gamma_alpha_ratio = self._safe_ratio(gamma_ratio_power, alpha_ratio_power)
 
-        # Version "paper-consistent light" :
-        # on enlève gamma du dénominateur et on oppose activité plus rapide vs plus lente
         spectral_power_ratio = self._safe_ratio(
             alpha_ratio_power + beta_ratio_power,
             theta_ratio_power + delta_ratio_power,
@@ -398,22 +497,40 @@ class SignalSpectralAnalysisEngine:
         gamma_band = self.params.bands.get("gamma", (0.0, 0.0))
 
         dominant_frequency_full = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, full_band[0], full_band[1]
+            fft_freqs,
+            fft_magnitude,
+            full_band[0],
+            full_band[1],
         )
         dominant_frequency_delta = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, delta_band[0], delta_band[1]
+            fft_freqs,
+            fft_magnitude,
+            delta_band[0],
+            delta_band[1],
         )
         dominant_frequency_theta = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, theta_band[0], theta_band[1]
+            fft_freqs,
+            fft_magnitude,
+            theta_band[0],
+            theta_band[1],
         )
         dominant_frequency_alpha = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, alpha_band[0], alpha_band[1]
+            fft_freqs,
+            fft_magnitude,
+            alpha_band[0],
+            alpha_band[1],
         )
         dominant_frequency_beta = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, beta_band[0], beta_band[1]
+            fft_freqs,
+            fft_magnitude,
+            beta_band[0],
+            beta_band[1],
         )
         dominant_frequency_gamma = self._compute_dominant_frequency(
-            fft_freqs, fft_magnitude, gamma_band[0], gamma_band[1]
+            fft_freqs,
+            fft_magnitude,
+            gamma_band[0],
+            gamma_band[1],
         )
 
         centroid = self._compute_centroid(freqs, psd)

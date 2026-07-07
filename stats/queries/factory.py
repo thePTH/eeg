@@ -1,7 +1,4 @@
 from dataclasses import dataclass
-from typing import Iterable
-
-
 from typing import Final, Iterable, Literal, Optional
 
 from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
@@ -32,21 +29,22 @@ from .types import Scope, TestKind
 @dataclass(frozen=True)
 class QueryFactoryConfig:
     """
-    Configuration du QueryFactory.
+    Configuration used by QueryFactory.
 
-    Cette configuration indique comment classifier un nom métier :
-    - variable sujet
-    - feature EEG scalaire
-    - bande PSD
-    - bande PPC
+    This configuration defines how a domain-level name should be classified:
+    - subject-level variable;
+    - scalar EEG feature;
+    - PSD band;
+    - PPC band.
 
     Important
     ---------
-    Les noms de bandes PSD et PPC peuvent se recouvrir (ex: theta, alpha, ...).
-    L'ambiguïté est levée par le scope :
+    PSD and PPC band names can overlap, for example theta or alpha. This
+    ambiguity is resolved through the scope:
     - single_channel / all_channels -> PSD
     - single_edge / all_edges       -> PPC
     """
+
     subject_variables: frozenset[str]
     eeg_features: frozenset[str]
     psd_bands: frozenset[str]
@@ -61,20 +59,17 @@ class QueryFactoryConfig:
         psd_bands: Iterable[str],
         ppc_bands: Iterable[str],
     ) -> "QueryFactoryConfig":
+        """Build a query factory configuration from iterable metadata lists."""
         return cls(
             subject_variables=frozenset(subject_variables),
             eeg_features=frozenset(eeg_features),
             psd_bands=frozenset(psd_bands),
             ppc_bands=frozenset(ppc_bands),
         )
-    
-
 
 
 class QueryFactory:
-    """
-    Factory métier pour construire automatiquement les bonnes query classes.
-    """
+    """Domain-level factory used to automatically build the right query class."""
 
     DEFAULT_GROUP_COLUMN: Final[str] = "subject_health"
     DEFAULT_NONPARAMETRIC_COMPARISON: Final[TestKind] = "wilcoxon_rank_sum"
@@ -101,6 +96,7 @@ class QueryFactory:
         correction: CorrectionSpec | None = None,
         parametric: bool = False,
     ) -> GroupComparisonQuery:
+        """Build a group-comparison query for a target variable."""
         test_kind: TestKind = (
             self.DEFAULT_PARAMETRIC_COMPARISON
             if parametric
@@ -208,6 +204,7 @@ class QueryFactory:
         edge: Optional[str] = None,
         correction: CorrectionSpec | None = None,
     ) -> CorrelationQuery:
+        """Build a correlation query between two variables."""
         test_kind: TestKind = self.DEFAULT_CORRELATION
 
         x_name = self._normalize_name(x)
@@ -381,6 +378,7 @@ class QueryFactory:
         correction: CorrectionSpec | None = None,
         posthoc: PostHocSpec | None = None,
     ) -> FactorialQuery:
+        """Build a one-way or two-way factorial analysis query."""
         name = self._normalize_name(target)
         normalized_factors = tuple(self._normalize_name(f) for f in factors)
 
@@ -495,6 +493,7 @@ class QueryFactory:
         correction: CorrectionSpec | None = None,
         posthoc: PostHocSpec | None = None,
     ) -> FactorialQuery:
+        """Build a one-way ANOVA query."""
         return self.factorial(
             target=target,
             factors=(factor,),
@@ -517,6 +516,7 @@ class QueryFactory:
         correction: CorrectionSpec | None = None,
         posthoc: PostHocSpec | None = None,
     ) -> FactorialQuery:
+        """Build a two-way ANOVA query."""
         return self.factorial(
             target=target,
             factors=(factor_a, factor_b),
@@ -544,6 +544,7 @@ class QueryFactory:
         edge: Optional[str] = None,
         correction: CorrectionSpec | None = None,
     ) -> GroupComparisonQuery:
+        """Build a group-comparison query with an explicit test kind."""
         return self.compare(
             target=target,
             group_a=group_a,
@@ -567,8 +568,10 @@ class QueryFactory:
         edge: Optional[str] = None,
         correction: CorrectionSpec | None = None,
     ) -> CorrelationQuery:
+        """Build a correlation query with an explicit test kind."""
         if test_kind != "spearman":
             raise ValueError("Only 'spearman' is currently supported for correlations")
+
         return self.correlate(
             x=x,
             y=y,
@@ -584,6 +587,7 @@ class QueryFactory:
 
     @classmethod
     def with_defaults(cls) -> "QueryFactory":
+        """Build a query factory using the default EEG project metadata."""
         config = QueryFactoryConfig.from_lists(
             subject_variables={
                 "age",
@@ -656,6 +660,7 @@ class QueryFactory:
                 "full",
             },
         )
+
         return cls(config=config)
 
     @classmethod
@@ -667,6 +672,7 @@ class QueryFactory:
         psd_bands: Iterable[str],
         ppc_bands: Iterable[str],
     ) -> "QueryFactory":
+        """Build a query factory from dataset-level metadata."""
         return cls(
             config=QueryFactoryConfig.from_lists(
                 subject_variables=subject_variables,
@@ -688,6 +694,7 @@ class QueryFactory:
         channel: Optional[str],
         edge: Optional[str],
     ) -> Scope:
+        """Infer the analysis scope for a target variable."""
         if scope is not None:
             return scope
 
@@ -706,13 +713,16 @@ class QueryFactory:
                 raise ValueError(
                     f"'{name}' is a subject-level variable, so channel and edge must be None."
                 )
+
             return "subject"
 
         if is_psd and is_ppc:
             if channel is not None:
                 return "single_channel"
+
             if edge is not None:
                 return "single_edge"
+
             raise ValueError(
                 f"Variable '{name}' is ambiguous because it is registered as both a PSD band "
                 "and a PPC band. Please specify `scope` explicitly, or provide `channel` "
@@ -722,11 +732,13 @@ class QueryFactory:
         if is_eeg or is_psd:
             if edge is not None:
                 raise ValueError(f"'{name}' is channel-based, so edge must be None.")
+
             return "single_channel" if channel is not None else "all_channels"
 
         if is_ppc:
             if channel is not None:
                 raise ValueError(f"'{name}' is edge-based, so channel must be None.")
+
             return "single_edge" if edge is not None else "all_edges"
 
         raise ValueError(self._unknown_variable_message(name))
@@ -740,6 +752,7 @@ class QueryFactory:
         channel: Optional[str],
         edge: Optional[str],
     ) -> Scope:
+        """Infer the analysis scope for a correlation query."""
         if scope is not None:
             return scope
 
@@ -765,6 +778,7 @@ class QueryFactory:
                 raise ValueError(
                     "Subject-vs-subject correlation cannot receive channel or edge."
                 )
+
             return "subject"
 
         if (x_is_eeg and y_is_subject) or (x_is_subject and y_is_eeg):
@@ -772,6 +786,7 @@ class QueryFactory:
                 raise ValueError(
                     "EEG-subject correlation is channel-based, so edge must be None."
                 )
+
             return "single_channel" if channel is not None else "all_channels"
 
         if (x_is_psd and y_is_subject) or (x_is_subject and y_is_psd):
@@ -779,6 +794,7 @@ class QueryFactory:
                 raise ValueError(
                     "PSD-subject correlation is channel-based, so edge must be None."
                 )
+
             return "single_channel" if channel is not None else "all_channels"
 
         if (x_is_ppc and y_is_subject) or (x_is_subject and y_is_ppc):
@@ -786,6 +802,7 @@ class QueryFactory:
                 raise ValueError(
                     "PPC-subject correlation is edge-based, so channel must be None."
                 )
+
             return "single_edge" if edge is not None else "all_edges"
 
         raise ValueError(
@@ -798,25 +815,38 @@ class QueryFactory:
     # ------------------------------------------------------------------------------
 
     def _normalize_name(self, name: str) -> str:
+        """Normalize and validate a domain-level variable name."""
         normalized = name.strip()
+
         if not normalized:
             raise ValueError("Variable name cannot be empty.")
+
         return normalized
 
     def _is_subject_variable(self, name: str) -> bool:
+        """Return whether a name is registered as a subject-level variable."""
         return name in self.config.subject_variables
 
     def _is_eeg_feature(self, name: str) -> bool:
+        """Return whether a name is registered as an EEG feature."""
         return name in self.config.eeg_features
 
     def _is_psd_band(self, name: str) -> bool:
+        """Return whether a name is registered as a PSD band."""
         return name in self.config.psd_bands
 
     def _is_ppc_band(self, name: str) -> bool:
+        """Return whether a name is registered as a PPC band."""
         return name in self.config.ppc_bands
 
     def _validate_factors_are_subject_level(self, factors: tuple[str, ...]) -> None:
-        unknown = [factor for factor in factors if factor not in self.config.subject_variables]
+        """Ensure that all factorial-design factors are subject-level variables."""
+        unknown = [
+            factor
+            for factor in factors
+            if factor not in self.config.subject_variables
+        ]
+
         if unknown:
             raise ValueError(
                 "All factors must be subject-level variables. "
@@ -836,15 +866,18 @@ class QueryFactory:
         edge: Optional[str],
         name: str,
     ) -> None:
+        """Validate that a query uses the subject-level scope correctly."""
         if scope != "subject":
             raise ValueError(
                 f"'{name}' is a subject-level variable and therefore requires "
                 "scope='subject'."
             )
+
         if channel is not None:
             raise ValueError(
                 f"'{name}' is a subject-level variable, so channel must be None."
             )
+
         if edge is not None:
             raise ValueError(
                 f"'{name}' is a subject-level variable, so edge must be None."
@@ -859,6 +892,7 @@ class QueryFactory:
         name: str,
         family: str,
     ) -> None:
+        """Validate that a channel-based query uses channel scope consistently."""
         if scope not in {"single_channel", "all_channels"}:
             raise ValueError(
                 f"'{name}' is a {family} and therefore requires "
@@ -886,6 +920,7 @@ class QueryFactory:
         name: str,
         family: str,
     ) -> None:
+        """Validate that an edge-based query uses edge scope consistently."""
         if scope not in {"single_edge", "all_edges"}:
             raise ValueError(
                 f"'{name}' is a {family} and therefore requires "
@@ -905,6 +940,7 @@ class QueryFactory:
             )
 
     def _unknown_variable_message(self, name: str) -> str:
+        """Return the error message used when a variable name is unknown."""
         return (
             f"Unknown variable '{name}'. "
             f"Known subject variables: {sorted(self.config.subject_variables)}. "

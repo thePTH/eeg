@@ -10,11 +10,30 @@ from stats.queries.base import StatisticalQuery
 
 class StatisticalTestEngineFactory:
     """
-    Factory interne : choisit le bon engine à partir de la query.
+    Factory responsible for selecting the appropriate statistical engine
+    according to the requested statistical query.
     """
 
     @staticmethod
     def build(query: StatisticalQuery) -> StatisticalTestEngine:
+        """
+        Build the statistical engine corresponding to the query.
+
+        Parameters
+        ----------
+        query : StatisticalQuery
+            Statistical query describing the requested test.
+
+        Returns
+        -------
+        StatisticalTestEngine
+            Engine implementing the requested statistical test.
+
+        Raises
+        ------
+        ValueError
+            If the requested test kind is not supported.
+        """
         match query.test_kind:
             case "t_test":
                 return TTestEngine(equal_var=False)

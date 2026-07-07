@@ -7,18 +7,16 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     balanced_accuracy_score,
+    cohen_kappa_score,
     confusion_matrix,
+    matthews_corrcoef,
     precision_recall_fscore_support,
     roc_auc_score,
-    average_precision_score,
-    matthews_corrcoef,
-    cohen_kappa_score,
 )
-
 from tqdm.auto import tqdm
 
 from prediction.neural_network.neural_backbone.logits_aggregator import (
@@ -26,9 +24,10 @@ from prediction.neural_network.neural_backbone.logits_aggregator import (
 )
 
 
-
 @dataclass(frozen=True)
 class ClassEvaluationMetrics:
+    """Per-class evaluation metrics."""
+
     class_name: str
     precision: float
     recall: float
@@ -36,6 +35,7 @@ class ClassEvaluationMetrics:
     support: int
 
     def to_dict(self) -> dict[str, Any]:
+        """Return metrics as a dictionary."""
         return {
             "class_name": self.class_name,
             "precision": self.precision,
@@ -47,6 +47,8 @@ class ClassEvaluationMetrics:
 
 @dataclass(frozen=True)
 class NeuralNetworkEvaluationResult:
+    """Complete evaluation result for a binary neural-network classifier."""
+
     y_true: np.ndarray
     y_pred: np.ndarray
     y_proba: np.ndarray
@@ -75,6 +77,7 @@ class NeuralNetworkEvaluationResult:
     class_metrics: tuple[ClassEvaluationMetrics, ...]
 
     def predictions_dataframe(self) -> pd.DataFrame:
+        """Return sample-level predictions as a DataFrame."""
         return pd.DataFrame(
             {
                 "y_true": self.y_true,
@@ -84,11 +87,13 @@ class NeuralNetworkEvaluationResult:
         )
 
     def class_metrics_dataframe(self) -> pd.DataFrame:
+        """Return per-class metrics as a DataFrame."""
         return pd.DataFrame(
             [metric.to_dict() for metric in self.class_metrics]
         )
 
     def confusion_matrix_dataframe(self) -> pd.DataFrame:
+        """Return the confusion matrix as a labeled DataFrame."""
         return pd.DataFrame(
             self.confusion_matrix,
             index=["true_healthy", "true_alzheimer"],
@@ -96,6 +101,7 @@ class NeuralNetworkEvaluationResult:
         )
 
     def summary_dataframe(self) -> pd.DataFrame:
+        """Return global evaluation metrics as a one-row DataFrame."""
         return pd.DataFrame(
             [
                 {
@@ -119,6 +125,7 @@ class NeuralNetworkEvaluationResult:
         )
 
     def print_report(self) -> None:
+        """Print a readable evaluation report."""
         print("\n[1] Global metrics")
         print("-" * 90)
         print(f"Accuracy:                  {self.accuracy:.4f}")
@@ -142,11 +149,15 @@ class NeuralNetworkEvaluationResult:
 
 @dataclass
 class NeuralNetworkEvaluationEngineParameters:
+    """Configuration parameters for neural-network evaluation."""
+
     macro_aggregation_method: str = "mean_logit"
     class_names: tuple[str, str] = ("Healthy", "Alzheimer")
 
 
 class NeuralNetworkEvaluationEngine:
+    """Evaluation engine for binary neuro-symbolic neural-network models."""
+
     def __init__(self, params: NeuralNetworkEvaluationEngineParameters):
         self.params = params
 
@@ -158,18 +169,22 @@ class NeuralNetworkEvaluationEngine:
         threshold: float = 0.5,
         show_progress: bool = False,
     ) -> NeuralNetworkEvaluationResult:
-
+        """Evaluate a neural network over a dataloader."""
         device = next(model.parameters()).device
         model.eval()
 
         y_true_list: list[torch.Tensor] = []
         y_proba_list: list[torch.Tensor] = []
 
-        iterator = tqdm(
-            dataloader,
-            desc=f"Evaluation threshold={threshold:.4f}",
-            leave=False,
-        ) if show_progress else dataloader
+        iterator = (
+            tqdm(
+                dataloader,
+                desc=f"Evaluation threshold={threshold:.4f}",
+                leave=False,
+            )
+            if show_progress
+            else dataloader
+        )
 
         for micro_x_raws, macro_x_feat, y_true in iterator:
             micro_x_raws = micro_x_raws.to(device)
@@ -182,14 +197,6 @@ class NeuralNetworkEvaluationEngine:
                     f"Got {micro_x_raws.shape}."
                 )
 
-            # DataLoader:
-            #   [batch, n_micro_segments, channels, samples]
-            #
-            # Aggregators:
-            #   [n_micro_segments, batch]
-            #
-            # Donc :
-            #   [n_micro_segments, batch, channels, samples]
             micro_x_raws = micro_x_raws.permute(
                 1,
                 0,
@@ -312,6 +319,8 @@ class NeuralNetworkEvaluationEngine:
 
 
 class NeuralNetworkBestThresholdFactory:
+    """Factory used to find the best decision threshold for a neural model."""
+
     @staticmethod
     def find(
         model: nn.Module,
@@ -321,13 +330,12 @@ class NeuralNetworkBestThresholdFactory:
         thresholds: np.ndarray | None = None,
     ) -> NeuralNetworkEvaluationResult:
         """
-        Trouve le meilleur threshold en supposant que la fonction
-        threshold -> score est unimodale.
+        Find the best threshold for a chosen metric.
 
-        Utilise une recherche ternaire discrète au lieu de tester
-        tous les thresholds.
+        The method assumes that the threshold-to-score curve is approximately
+        unimodal and uses a discrete ternary search instead of evaluating all
+        thresholds.
         """
-
         if thresholds is None:
             thresholds = np.linspace(0.01, 0.99, 99)
 
@@ -341,6 +349,7 @@ class NeuralNetworkBestThresholdFactory:
         cache: dict[int, NeuralNetworkEvaluationResult] = {}
 
         def evaluate_index(index: int) -> tuple[float, NeuralNetworkEvaluationResult]:
+            """Evaluate one threshold index and cache the result."""
             if index not in cache:
                 result = engine.evaluate(
                     model=model,

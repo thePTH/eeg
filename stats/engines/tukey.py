@@ -9,10 +9,10 @@ from stats.results import PostHocComparisonResult, PostHocResultSet
 
 class TukeyHSDPostHocEngine:
     """
-    Post-hoc Tukey HSD pour une ANOVA à un facteur.
+    Tukey HSD post-hoc engine for one-way ANOVA.
 
-    On garde cette classe séparée des StatisticalTestEngine
-    car un post-hoc ne renvoie pas un résultat scalaire unique.
+    This class is kept separate from StatisticalTestEngine because a post-hoc
+    analysis does not return a single scalar statistical result.
     """
 
     method_name = "tukey-hsd"
@@ -25,6 +25,7 @@ class TukeyHSDPostHocEngine:
         key: str,
         alpha: float = 0.05,
     ) -> PostHocResultSet:
+        """Compute Tukey HSD post-hoc comparisons."""
         df = pd.DataFrame(
             {
                 "value": pd.to_numeric(bundle.values, errors="coerce"),
@@ -43,7 +44,6 @@ class TukeyHSDPostHocEngine:
 
         comparisons: list[PostHocComparisonResult] = []
 
-        # statsmodels renvoie un SimpleTable ; on exploite directement les données
         raw_rows = tukey.summary().data[1:]
 
         for row in raw_rows:

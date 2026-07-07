@@ -1,29 +1,21 @@
 import warnings
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-
+from sklearn.metrics import balanced_accuracy_score, f1_score
 from torch.utils.data import DataLoader
-from dataclasses import dataclass
-from tqdm.auto import tqdm
-
 from torch.utils.tensorboard import SummaryWriter
-
-from sklearn.metrics import (
-    balanced_accuracy_score,
-    f1_score,
-)
-
-from rules.differentiable_rule import DifferentiableDecisionRule
+from tqdm.auto import tqdm
 
 from prediction.neural_network.neural_backbone.logits_aggregator import (
     MicroLogitsSupervisedLossAggregator,
     MicroLogitsToMacroProbabilityAggregator,
 )
-
 from prediction.neural_network.neuro_symbolic.logic_loss import (
     ConditionalViolationLossEngine,
 )
+from rules.differentiable_rule import DifferentiableDecisionRule
 
 
 warnings.filterwarnings(
@@ -39,6 +31,8 @@ warnings.filterwarnings(
 
 @dataclass
 class NeuroSymbolicDeepEEGTrainerParameters:
+    """Configuration parameters for neuro-symbolic DeepEEG training."""
+
     epochs: int = 5
     lr: float = 1e-3
     weight_decay: float = 1e-4
@@ -55,6 +49,7 @@ class NeuroSymbolicDeepEEGTrainerParameters:
 
 
 class NeuroSymbolicDeepEEGTrainer:
+    """Trainer for a DeepEEG model regularized with differentiable logical rules."""
 
     def __init__(
         self,
@@ -69,7 +64,7 @@ class NeuroSymbolicDeepEEGTrainer:
         model: nn.Module,
         micro_x_raws: torch.Tensor,
     ) -> torch.Tensor:
-
+        """Forward all micro-segments through the neural model."""
         if micro_x_raws.ndim != 4:
             raise ValueError(
                 "Expected micro_x_raws with shape "
@@ -101,7 +96,7 @@ class NeuroSymbolicDeepEEGTrainer:
         macro_x_feat: torch.Tensor,
         device: torch.device,
     ) -> torch.Tensor:
-
+        """Compute the summed conditional-violation loss over all rules."""
         logic_loss = torch.zeros(
             (),
             device=device,
@@ -124,7 +119,7 @@ class NeuroSymbolicDeepEEGTrainer:
         supervised_loss: torch.Tensor,
         logic_loss: torch.Tensor,
     ) -> None:
-
+        """Update moving-average loss scales used for logic-loss normalization."""
         with torch.no_grad():
 
             supervised_value = supervised_loss.detach()
@@ -158,7 +153,7 @@ class NeuroSymbolicDeepEEGTrainer:
         logic_loss: torch.Tensor,
         train: bool,
     ) -> torch.Tensor:
-
+        """Rescale the logic loss to keep it comparable to the supervised loss."""
         if train:
             self._update_loss_scales(
                 supervised_loss=supervised_loss,
@@ -192,7 +187,7 @@ class NeuroSymbolicDeepEEGTrainer:
         device: torch.device,
         train: bool,
     ) -> dict[str, torch.Tensor | float | int]:
-
+        """Compute losses, predictions, and metrics for one batch."""
         micro_x_raws = micro_x_raws.to(device)
         macro_x_feat = macro_x_feat.to(device)
         y_true = y_true.to(device).float()
@@ -266,7 +261,7 @@ class NeuroSymbolicDeepEEGTrainer:
         optimizer: torch.optim.Optimizer | None = None,
         train: bool = True,
     ) -> dict[str, float]:
-
+        """Run one training or validation epoch."""
         if train:
             model.train()
         else:
@@ -406,7 +401,7 @@ class NeuroSymbolicDeepEEGTrainer:
         val_dataloader: DataLoader | None = None,
         return_history: bool = False,
     ):
-
+        """Train the model and optionally return the metric history."""
         device = torch.device(
             "cuda"
             if torch.cuda.is_available()
@@ -543,7 +538,7 @@ class NeuroSymbolicDeepEEGTrainer:
         rules: list[DifferentiableDecisionRule],
         dataloader: DataLoader,
     ) -> dict[str, float]:
-
+        """Evaluate the trained model on a dataloader."""
         device = torch.device(
             "cuda"
             if torch.cuda.is_available()

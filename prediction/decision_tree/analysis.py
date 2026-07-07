@@ -16,68 +16,89 @@ from .base import TrainedDecisionTree
 
 @dataclass(frozen=True, slots=True)
 class ClassProbabilityDistribution:
+    """Class-probability distribution stored at a decision-tree node."""
+
     probabilities: dict[Any, float]
 
     @property
     def predicted_class(self) -> Any:
+        """Return the class with the highest probability."""
         return max(self.probabilities, key=self.probabilities.get)
 
     @property
     def predicted_probability(self) -> float:
+        """Return the probability of the predicted class."""
         return self.probabilities[self.predicted_class]
 
     def probability_of(self, class_name: Any) -> float:
+        """Return the probability of a given class."""
         return self.probabilities.get(class_name, 0.0)
 
     def to_dict(self) -> dict[Any, float]:
+        """Return the distribution as a dictionary."""
         return dict(self.probabilities)
 
 
 @dataclass(frozen=True, slots=True)
 class LogicalCondition:
+    """Human-readable logical condition extracted from a decision-tree split."""
+
     feature_name: str
     operator: str
     threshold: float
 
     def __str__(self) -> str:
+        """Return the condition as a readable string."""
         return f"{self.feature_name} {self.operator} {self.threshold:.6g}"
 
 
 @dataclass(frozen=True, slots=True)
 class LogicalRule:
+    """Logical rule represented as a conjunction of conditions."""
+
     conditions: tuple[LogicalCondition, ...]
 
     @property
     def is_root(self) -> bool:
+        """Return whether the rule corresponds to the tree root."""
         return len(self.conditions) == 0
 
     def __str__(self) -> str:
+        """Return the rule as a readable string."""
         if self.is_root:
             return "ROOT"
+
         return " AND ".join(str(condition) for condition in self.conditions)
 
     def extend(self, condition: LogicalCondition) -> LogicalRule:
+        """Return a new rule extended with one additional condition."""
         return LogicalRule(self.conditions + (condition,))
 
 
 @dataclass(frozen=True, slots=True)
 class NodeProbabilityAnalysis:
+    """Probability analysis associated with one decision-tree node."""
+
     class_counts: dict[Any, float]
     distribution: ClassProbabilityDistribution
 
     @property
     def predicted_class(self) -> Any:
+        """Return the predicted class at the node."""
         return self.distribution.predicted_class
 
     @property
     def confidence(self) -> float:
+        """Return the predicted-class probability."""
         return self.distribution.predicted_probability
 
     @property
     def total_count(self) -> float:
+        """Return the total weighted class count at the node."""
         return float(sum(self.class_counts.values()))
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the node probability analysis as a dictionary."""
         return {
             "class_probas": self.distribution.to_dict(),
             "predicted_class": self.predicted_class,
@@ -88,6 +109,8 @@ class NodeProbabilityAnalysis:
 
 @dataclass(frozen=True, slots=True)
 class TreeNodeResult:
+    """Analysis result for one decision-tree node."""
+
     node_id: int
     depth: int
     is_leaf: bool
@@ -101,13 +124,16 @@ class TreeNodeResult:
 
     @property
     def predicted_class(self) -> Any:
+        """Return the predicted class at the node."""
         return self.probability_analysis.predicted_class
 
     @property
     def confidence(self) -> float:
+        """Return the predicted-class confidence at the node."""
         return self.probability_analysis.confidence
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the node result as a dictionary."""
         return {
             "node_id": self.node_id,
             "depth": self.depth,
@@ -125,6 +151,8 @@ class TreeNodeResult:
 
 @dataclass(frozen=True, slots=True)
 class SplitDiscriminationScore:
+    """Impurity-based discrimination score for an internal split."""
+
     impurity_name: str
     parent_impurity: float
     left_impurity: float
@@ -134,6 +162,7 @@ class SplitDiscriminationScore:
     weighted_impurity_gain: float
 
     def to_dict(self) -> dict[str, float | str]:
+        """Return the split score as a dictionary."""
         return {
             "parent_impurity": self.parent_impurity,
             "left_impurity": self.left_impurity,
@@ -146,6 +175,8 @@ class SplitDiscriminationScore:
 
 @dataclass(frozen=True, slots=True)
 class InternalSplitResult:
+    """Analysis result for one internal decision-tree split."""
+
     node_id: int
     depth: int
     samples: int
@@ -155,6 +186,7 @@ class InternalSplitResult:
     score: SplitDiscriminationScore
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the internal split result as a dictionary."""
         return {
             "node_id": self.node_id,
             "depth": self.depth,
@@ -168,6 +200,8 @@ class InternalSplitResult:
 
 @dataclass(frozen=True, slots=True)
 class LeafRuleStrengthScore:
+    """Strength score associated with a leaf rule."""
+
     confidence: float
     support: int
     strength: float
@@ -177,6 +211,7 @@ class LeafRuleStrengthScore:
         confidence: float,
         support: int,
     ) -> LeafRuleStrengthScore:
+        """Build a leaf-rule strength score from confidence and support."""
         return LeafRuleStrengthScore(
             confidence=confidence,
             support=support,
@@ -186,6 +221,8 @@ class LeafRuleStrengthScore:
 
 @dataclass(frozen=True, slots=True)
 class LeafRuleResult:
+    """Analysis result for one decision-tree leaf rule."""
+
     node_id: int
     predicted_class: Any
     rule: LogicalRule
@@ -195,6 +232,7 @@ class LeafRuleResult:
     score: LeafRuleStrengthScore
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the leaf rule result as a dictionary."""
         return {
             "node_id": self.node_id,
             "predicted_class": self.predicted_class,
@@ -209,6 +247,8 @@ class LeafRuleResult:
 
 @dataclass(frozen=True, slots=True)
 class EEGFeatureDescriptor:
+    """Structured descriptor inferred from an EEG feature name."""
+
     feature_name: str
     kind: str
     channel_1: str | None
@@ -216,6 +256,7 @@ class EEGFeatureDescriptor:
     edge: str | None
 
     def to_dict(self) -> dict[str, str | None]:
+        """Return the EEG feature descriptor as a dictionary."""
         return {
             "feature": self.feature_name,
             "kind": self.kind,
@@ -231,20 +272,28 @@ class EEGFeatureDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class NodeAnalysisResult:
+    """Container for decision-tree node analysis results."""
+
     nodes: tuple[TreeNodeResult, ...]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Return node analysis results as a DataFrame."""
         return pd.DataFrame([node.to_dict() for node in self.nodes])
 
 
 @dataclass(frozen=True, slots=True)
 class InternalSplitAnalysisResult:
+    """Container for internal split analysis results."""
+
     splits: tuple[InternalSplitResult, ...]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Return internal split analysis results as a sorted DataFrame."""
         df = pd.DataFrame([split.to_dict() for split in self.splits])
+
         if df.empty:
             return df
+
         return df.sort_values(
             "weighted_impurity_gain",
             ascending=False,
@@ -253,12 +302,17 @@ class InternalSplitAnalysisResult:
 
 @dataclass(frozen=True, slots=True)
 class LeafRuleAnalysisResult:
+    """Container for leaf rule analysis results."""
+
     rules: tuple[LeafRuleResult, ...]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Return leaf rule analysis results as a sorted DataFrame."""
         df = pd.DataFrame([rule.to_dict() for rule in self.rules])
+
         if df.empty:
             return df
+
         return df.sort_values(
             ["strength", "confidence", "support"],
             ascending=[False, False, False],
@@ -267,12 +321,17 @@ class LeafRuleAnalysisResult:
 
 @dataclass(frozen=True, slots=True)
 class FeatureImportanceAnalysisResult:
+    """Container for feature importance analysis results."""
+
     rows: tuple[dict[str, Any], ...]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Return feature importance results as a sorted DataFrame."""
         df = pd.DataFrame(list(self.rows))
+
         if df.empty:
             return df
+
         return df.sort_values(
             ["sklearn_importance", "weighted_impurity_gain", "n_splits"],
             ascending=[False, False, False],
@@ -281,18 +340,24 @@ class FeatureImportanceAnalysisResult:
 
 @dataclass(frozen=True, slots=True)
 class EEGFeatureAnalysisResult:
+    """Container for EEG-structure analysis results."""
+
     rows: tuple[dict[str, Any], ...]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Return EEG feature analysis results as a sorted DataFrame."""
         df = pd.DataFrame(list(self.rows))
+
         if df.empty:
             return df
+
         return df.sort_values(
             ["weighted_impurity_gain", "sklearn_importance", "n_splits"],
             ascending=[False, False, False],
         ).reset_index(drop=True)
 
     def channel_summary(self) -> pd.DataFrame:
+        """Return an aggregated summary by EEG channel."""
         df = self.to_dataframe()
 
         if df.empty:
@@ -333,6 +398,7 @@ class EEGFeatureAnalysisResult:
         )
 
     def edge_summary(self) -> pd.DataFrame:
+        """Return an aggregated summary by connectivity edge."""
         df = self.to_dataframe()
         df = df[df["kind"] == "edge"].copy()
 
@@ -357,23 +423,29 @@ class EEGFeatureAnalysisResult:
 # =============================================================================
 
 class TrainedDecisionTreeMetadataExtractor:
+    """Extractor for metadata attached to a trained decision tree."""
+
     def __init__(self, trained_decision_tree: TrainedDecisionTree) -> None:
         self.trained_decision_tree = trained_decision_tree
 
     @property
     def classifier(self) -> DecisionTreeClassifier:
+        """Return the trained classifier."""
         return self.trained_decision_tree.classifier
 
     @property
     def dataset(self) -> Any:
+        """Return the dataset used to train the tree."""
         return self.trained_decision_tree.dataset
 
     @property
     def criterion(self) -> str:
+        """Return the impurity criterion used by the tree."""
         return str(self.classifier.get_params().get("criterion", "impurity"))
 
     @property
     def class_names(self) -> list[Any]:
+        """Return the class names known by the classifier or dataset."""
         if hasattr(self.dataset, "class_names"):
             return list(self.dataset.class_names)
 
@@ -384,12 +456,13 @@ class TrainedDecisionTreeMetadataExtractor:
 
     @property
     def feature_names(self) -> list[str]:
-        
-
+        """Return the feature names used by the trained tree."""
         return self.dataset.all_feature_names
 
 
 class EEGFeatureParser:
+    """Parser used to infer EEG structure from feature names."""
+
     DEFAULT_EEG_CHANNELS = {
         "Fp1", "Fp2",
         "F3", "F4", "F7", "F8", "Fz",
@@ -403,11 +476,13 @@ class EEGFeatureParser:
         self.eeg_channels = set(eeg_channels or self.DEFAULT_EEG_CHANNELS)
 
     def parse(self, feature_name: str) -> EEGFeatureDescriptor:
+        """Parse a feature name into an EEG feature descriptor."""
         tokens = feature_name.split("_")
         channels = [token for token in tokens if token in self.eeg_channels]
 
         if len(channels) >= 2:
             channel_1, channel_2 = channels[-2], channels[-1]
+
             return EEGFeatureDescriptor(
                 feature_name=feature_name,
                 kind="edge",
@@ -418,6 +493,7 @@ class EEGFeatureParser:
 
         if len(channels) == 1:
             channel = channels[0]
+
             return EEGFeatureDescriptor(
                 feature_name=feature_name,
                 kind="channel",
@@ -440,6 +516,8 @@ class EEGFeatureParser:
 # =============================================================================
 
 class NodeProbabilityAnalysisEngine:
+    """Engine used to analyze class probabilities at decision-tree nodes."""
+
     def __init__(self, class_names: list[Any]) -> None:
         self.class_names = class_names
 
@@ -448,6 +526,7 @@ class NodeProbabilityAnalysisEngine:
         classifier: DecisionTreeClassifier,
         node_id: int,
     ) -> NodeProbabilityAnalysis:
+        """Analyze the class distribution stored at one tree node."""
         tree_ = classifier.tree_
 
         raw_values = tree_.value[node_id][0].astype(float)
@@ -475,6 +554,8 @@ class NodeProbabilityAnalysisEngine:
 
 
 class TreeTraversalAnalysisEngine:
+    """Engine used to traverse a decision tree and analyze each node."""
+
     def __init__(
         self,
         classifier: DecisionTreeClassifier,
@@ -489,6 +570,7 @@ class TreeTraversalAnalysisEngine:
         self.probability_engine = NodeProbabilityAnalysisEngine(class_names)
 
     def analyze(self) -> NodeAnalysisResult:
+        """Traverse the full tree and return node analysis results."""
         nodes: list[TreeNodeResult] = []
 
         self._walk(
@@ -507,6 +589,7 @@ class TreeTraversalAnalysisEngine:
         rule: LogicalRule,
         nodes: list[TreeNodeResult],
     ) -> None:
+        """Recursively traverse the tree and collect node results."""
         tree_ = self.classifier.tree_
 
         left_child = tree_.children_left[node_id]
@@ -575,6 +658,8 @@ class TreeTraversalAnalysisEngine:
 
 
 class InternalSplitAnalysisEngine:
+    """Engine used to score internal decision-tree splits."""
+
     def __init__(
         self,
         classifier: DecisionTreeClassifier,
@@ -588,6 +673,7 @@ class InternalSplitAnalysisEngine:
         self.node_result = node_result
 
     def analyze(self) -> InternalSplitAnalysisResult:
+        """Analyze and score all internal tree splits."""
         tree_ = self.classifier.tree_
 
         splits: list[InternalSplitResult] = []
@@ -646,10 +732,13 @@ class InternalSplitAnalysisEngine:
 
 
 class LeafRuleAnalysisEngine:
+    """Engine used to extract and score leaf-level rules."""
+
     def __init__(self, node_result: NodeAnalysisResult) -> None:
         self.node_result = node_result
 
     def analyze(self, min_samples: int = 1) -> LeafRuleAnalysisResult:
+        """Analyze leaf rules with at least ``min_samples`` samples."""
         rules: list[LeafRuleResult] = []
 
         for node in self.node_result.nodes:
@@ -680,6 +769,8 @@ class LeafRuleAnalysisEngine:
 
 
 class FeatureImportanceAnalysisEngine:
+    """Engine combining sklearn importances with split-level impurity gains."""
+
     def __init__(
         self,
         classifier: DecisionTreeClassifier,
@@ -691,6 +782,7 @@ class FeatureImportanceAnalysisEngine:
         self.split_result = split_result
 
     def analyze(self) -> FeatureImportanceAnalysisResult:
+        """Analyze feature importance from sklearn importances and split usage."""
         split_df = self.split_result.to_dataframe()
 
         if split_df.empty:
@@ -708,6 +800,7 @@ class FeatureImportanceAnalysisEngine:
                     self.classifier.feature_importances_,
                 )
             ]
+
             return FeatureImportanceAnalysisResult(tuple(rows))
 
         usage_df = (
@@ -747,6 +840,8 @@ class FeatureImportanceAnalysisEngine:
 
 
 class EEGStructureAnalysisEngine:
+    """Engine used to attach EEG structural metadata to feature importance rows."""
+
     def __init__(
         self,
         feature_result: FeatureImportanceAnalysisResult,
@@ -756,6 +851,7 @@ class EEGStructureAnalysisEngine:
         self.parser = parser or EEGFeatureParser()
 
     def analyze(self) -> EEGFeatureAnalysisResult:
+        """Analyze EEG channel and edge structure from feature names."""
         feature_df = self.feature_result.to_dataframe()
 
         rows: list[dict[str, Any]] = []
@@ -782,6 +878,8 @@ class EEGStructureAnalysisEngine:
 # =============================================================================
 
 class DecisionTreeAnalysisEngine:
+    """High-level orchestrator for complete decision-tree interpretability analysis."""
+
     def __init__(
         self,
         trained_decision_tree: TrainedDecisionTree,
@@ -806,6 +904,7 @@ class DecisionTreeAnalysisEngine:
         self._eeg_result: EEGFeatureAnalysisResult | None = None
 
     def node_analysis(self) -> NodeAnalysisResult:
+        """Return cached or newly computed node analysis."""
         if self._node_result is None:
             self._node_result = TreeTraversalAnalysisEngine(
                 classifier=self.classifier,
@@ -817,6 +916,7 @@ class DecisionTreeAnalysisEngine:
         return self._node_result
 
     def internal_split_analysis(self) -> InternalSplitAnalysisResult:
+        """Return cached or newly computed internal split analysis."""
         if self._split_result is None:
             self._split_result = InternalSplitAnalysisEngine(
                 classifier=self.classifier,
@@ -828,11 +928,13 @@ class DecisionTreeAnalysisEngine:
         return self._split_result
 
     def leaf_rule_analysis(self, min_samples: int = 1) -> LeafRuleAnalysisResult:
+        """Return leaf rule analysis."""
         return LeafRuleAnalysisEngine(
             node_result=self.node_analysis(),
         ).analyze(min_samples=min_samples)
 
     def feature_importance_analysis(self) -> FeatureImportanceAnalysisResult:
+        """Return cached or newly computed feature importance analysis."""
         if self._feature_result is None:
             self._feature_result = FeatureImportanceAnalysisEngine(
                 classifier=self.classifier,
@@ -843,6 +945,7 @@ class DecisionTreeAnalysisEngine:
         return self._feature_result
 
     def eeg_structure_analysis(self) -> EEGFeatureAnalysisResult:
+        """Return cached or newly computed EEG structure analysis."""
         if self._eeg_result is None:
             self._eeg_result = EEGStructureAnalysisEngine(
                 feature_result=self.feature_importance_analysis(),
@@ -852,6 +955,7 @@ class DecisionTreeAnalysisEngine:
         return self._eeg_result
 
     def node_dataframe(self) -> pd.DataFrame:
+        """Return node analysis as a DataFrame."""
         return self.node_analysis().to_dataframe()
 
     def strongest_leaf_rules(
@@ -860,6 +964,7 @@ class DecisionTreeAnalysisEngine:
         min_samples: int = 5,
         sort_by: str = "strength",
     ) -> pd.DataFrame:
+        """Return strongest leaf rules sorted by the requested criterion."""
         df = self.leaf_rule_analysis(min_samples=min_samples).to_dataframe()
 
         if df.empty:
@@ -886,18 +991,23 @@ class DecisionTreeAnalysisEngine:
         raise ValueError("sort_by doit être 'strength', 'confidence' ou 'samples'.")
 
     def strongest_internal_splits(self) -> pd.DataFrame:
+        """Return internal splits sorted by weighted impurity gain."""
         return self.internal_split_analysis().to_dataframe()
 
     def feature_importance_report(self) -> pd.DataFrame:
+        """Return the feature importance report."""
         return self.feature_importance_analysis().to_dataframe()
 
     def channel_edge_report(self) -> pd.DataFrame:
+        """Return the channel and edge report."""
         return self.eeg_structure_analysis().to_dataframe()
 
     def channel_summary(self) -> pd.DataFrame:
+        """Return the aggregated channel summary."""
         return self.eeg_structure_analysis().channel_summary()
 
     def edge_summary(self) -> pd.DataFrame:
+        """Return the aggregated edge summary."""
         return self.eeg_structure_analysis().edge_summary()
 
     def print_report(
@@ -906,6 +1016,7 @@ class DecisionTreeAnalysisEngine:
         min_samples_leaf: int = 5,
         top_n: int = 10,
     ) -> None:
+        """Print a human-readable decision-tree analysis report."""
         print("\n" + "=" * 100)
         print("DECISION TREE ANALYSIS REPORT")
         print("=" * 100)

@@ -8,28 +8,31 @@ from .types import Scope, TestKind
 @dataclass(frozen=True, kw_only=True, repr=False)
 class StatisticalQuery(ABC):
     """
-    Classe racine de toutes les requêtes statistiques.
+    Base class for all statistical queries.
 
-    Une query est une description métier :
-    - quelle cible est testée
-    - avec quelle portée (scope)
-    - avec quel test
-    - avec quelle correction éventuelle
+    A statistical query describes:
+    - the target variable;
+    - the analysis scope;
+    - the statistical test to perform;
+    - an optional multiple-comparison correction.
     """
+
     test_kind: TestKind
     scope: Scope
     correction: CorrectionSpec | None = None
 
     @property
     def target_name(self) -> str:
+        """Return the name of the target variable."""
         raise NotImplementedError
 
     def __repr__(self) -> str:
         """
-        Représentation compacte et lisible pour debug / logs / notebook.
+        Return a compact and readable representation suitable for debugging,
+        logging, and interactive notebooks.
 
-        Exemple
-        --------
+        Example
+        -------
         SubjectGroupComparisonQuery(
             target=mmse,
             test=wilcoxon_rank_sum,
@@ -39,7 +42,6 @@ class StatisticalQuery(ABC):
             group_b=Alzheimer
         )
         """
-
         class_name = self.__class__.__name__
 
         core = [
@@ -67,16 +69,16 @@ class StatisticalQuery(ABC):
         args = ", ".join(core + extras)
 
         return f"{class_name}({args})"
-    
+
     def __str__(self):
+        """Return the string representation of the query."""
         return self.__repr__()
 
 
 @dataclass(frozen=True, kw_only=True, repr=False)
 class GroupComparisonQuery(StatisticalQuery, ABC):
-    """
-    Requête abstraite pour comparer deux groupes.
-    """
+    """Abstract query for comparing two groups."""
+
     group_col: str
     group_a: str
     group_b: str
@@ -84,35 +86,40 @@ class GroupComparisonQuery(StatisticalQuery, ABC):
 
 @dataclass(frozen=True, kw_only=True, repr=False)
 class CorrelationQuery(StatisticalQuery, ABC):
-    """
-    Requête abstraite pour corrélation entre deux variables.
-    """
+    """Abstract query describing a correlation analysis."""
+
     pass
 
 
 @dataclass(frozen=True, kw_only=True, repr=False)
 class FactorialQuery(StatisticalQuery, ABC):
     """
-    Requête abstraite pour design factoriel.
+    Abstract query describing a factorial design.
 
     Convention
     ----------
-    - one_way_anova <=> len(factors) == 1
-    - two_way_anova <=> len(factors) == 2
+    - one_way_anova  -> exactly one factor
+    - two_way_anova  -> exactly two factors
     """
+
     factors: tuple[str, ...]
     posthoc: PostHocSpec | None = None
 
     def __post_init__(self):
+        """Validate the consistency between the selected test and the number of factors."""
         if self.test_kind == "one_way_anova" and len(self.factors) != 1:
             raise ValueError("one_way_anova requires exactly one factor")
+
         if self.test_kind == "two_way_anova" and len(self.factors) != 2:
             raise ValueError("two_way_anova requires exactly two factors")
+
         if self.test_kind not in {"one_way_anova", "two_way_anova"}:
             raise ValueError(
-                "FactorialQuery requires test_kind='one_way_anova' or 'two_way_anova'"
+                "FactorialQuery requires "
+                "test_kind='one_way_anova' or 'two_way_anova'"
             )
 
     @property
     def factor_names(self) -> tuple[str, ...]:
+        """Return the names of the experimental factors."""
         return self.factors

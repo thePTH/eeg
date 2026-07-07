@@ -8,9 +8,12 @@ from stats.engines.base import StatisticalTestEngine
 
 
 class SpearmanEngine(StatisticalTestEngine):
+    """Engine used to compute Spearman rank correlation."""
+
     test_name = "spearman"
 
     def compute(self, bundle: SampleBundle, *, target: str, key: str):
+        """Compute Spearman correlation from a correlation sample bundle."""
         if not isinstance(bundle, CorrelationSampleBundle):
             raise TypeError("SpearmanEngine expects a CorrelationSampleBundle")
 

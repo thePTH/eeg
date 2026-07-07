@@ -18,61 +18,57 @@ from .base import DecisionTree, TrainedDecisionTree
 
 @dataclass(frozen=True, slots=True)
 class DecisionTreeScoreResult:
+    """Cross-validation score summary for a decision tree."""
+
     mean: float
     std: float
     scoring: str
 
-    def adjusted_score(self, lambda_std:float):
-        return self.mean - lambda_std*self.std
-
-
-from dataclasses import dataclass
-from typing import Any
-import pandas as pd
+    def adjusted_score(self, lambda_std: float):
+        """Return a penalized score using the score standard deviation."""
+        return self.mean - lambda_std * self.std
 
 
 @dataclass(frozen=True, slots=True)
 class PerClassMetricResult:
+    """Per-class metric summary."""
+
     mean_by_class: dict[Any, float]
     std_by_class: dict[Any, float]
     metric_name: str
 
     def to_dataframe(self) -> pd.DataFrame:
-
-        df = pd.DataFrame({
-            f"{self.metric_name}_mean": self.mean_by_class,
-            f"{self.metric_name}_std": self.std_by_class,
-
-        })
+        """Return per-class metric values as a DataFrame."""
+        df = pd.DataFrame(
+            {
+                f"{self.metric_name}_mean": self.mean_by_class,
+                f"{self.metric_name}_std": self.std_by_class,
+            }
+        )
 
         df.index.name = "label"
+
         return df
 
     def to_series(self) -> pd.Series:
-        """
-        Convertit les moyennes par classe en Series pandas.
-        """
+        """Return per-class mean values as a pandas Series."""
         return pd.Series(
             self.mean_by_class,
             name=self.metric_name,
         )
 
 
-import pandas as pd
-import numpy as np
-from dataclasses import dataclass
-from typing import Any
-
-
 @dataclass(frozen=True, slots=True)
 class ConfusionMatrixResult:
+    """Mean and standard deviation of confusion matrices."""
+
     labels: list[Any]
     mean: np.ndarray
     std: np.ndarray
     normalize: str | None
 
     def to_dataframe(self, include_std: bool = False) -> pd.DataFrame:
-        
+        """Return the confusion matrix as a DataFrame."""
         if include_std:
             formatted = np.empty_like(self.mean, dtype=object)
 
@@ -95,6 +91,8 @@ class ConfusionMatrixResult:
 
 @dataclass(frozen=True, slots=True)
 class DecisionTreeDetailedScoreResult:
+    """Detailed performance report for a decision tree."""
+
     accuracy: DecisionTreeScoreResult
     balanced_accuracy: DecisionTreeScoreResult
     recall_by_class: PerClassMetricResult
@@ -103,11 +101,7 @@ class DecisionTreeDetailedScoreResult:
     confusion_matrix: ConfusionMatrixResult
 
     def report(self) -> None:
-        """
-        Affiche un rapport clair et lisible des performances du modèle.
-        Conçu pour console / notebook.
-        """
-
+        """Print a readable model performance report."""
         print("\n" + "=" * 50)
         print("🌳 DECISION TREE – FINAL TEST REPORT")
         print("=" * 50)
@@ -137,7 +131,14 @@ class DecisionTreeDetailedScoreResult:
 
 
 class DecisionTreeScoreEngine:
-    def __init__(self, n_splits: int = 5, scoring: str = "balanced_accuracy", random_seed:int=42):
+    """Scoring engine for decision-tree models."""
+
+    def __init__(
+        self,
+        n_splits: int = 5,
+        scoring: str = "balanced_accuracy",
+        random_seed: int = 42,
+    ):
         if n_splits < 2:
             raise ValueError("`n_splits` must be at least 2.")
 
@@ -153,11 +154,16 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> DecisionTreeScoreResult:
+        """Compute the configured cross-validation score."""
         X = dataset.X
         y = dataset.y
         groups = dataset.groups
 
-        cv = GroupKFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_seed)
+        cv = GroupKFold(
+            n_splits=self.n_splits,
+            shuffle=True,
+            random_state=self.random_seed,
+        )
 
         scores = cross_val_score(
             estimator=decision_tree.classifier,
@@ -167,7 +173,7 @@ class DecisionTreeScoreEngine:
             cv=cv,
             scoring=self.scoring,
             n_jobs=-1,
-    )
+        )
 
         return DecisionTreeScoreResult(
             mean=scores.mean(),
@@ -180,6 +186,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> PerClassMetricResult:
+        """Compute cross-validated recall by class."""
         return self._score_metric_by_class(
             decision_tree=decision_tree,
             dataset=dataset,
@@ -191,6 +198,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> PerClassMetricResult:
+        """Compute cross-validated precision by class."""
         return self._score_metric_by_class(
             decision_tree=decision_tree,
             dataset=dataset,
@@ -202,6 +210,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> PerClassMetricResult:
+        """Compute cross-validated F1-score by class."""
         return self._score_metric_by_class(
             decision_tree=decision_tree,
             dataset=dataset,
@@ -214,6 +223,7 @@ class DecisionTreeScoreEngine:
         dataset: SelectedFeaturesDataset,
         normalize: str | None = None,
     ) -> ConfusionMatrixResult:
+        """Compute mean and standard deviation of cross-validated confusion matrices."""
         X = dataset.X
         y = dataset.y
         groups = dataset.groups
@@ -252,6 +262,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> DecisionTreeDetailedScoreResult:
+        """Compute a full cross-validated performance report."""
         return DecisionTreeDetailedScoreResult(
             accuracy=self._global_score(
                 decision_tree=decision_tree,
@@ -287,6 +298,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> pd.DataFrame:
+        """Return a cross-validated classification report as a DataFrame."""
         y_true_all, y_pred_all = self._cross_validated_predictions(
             decision_tree=decision_tree,
             dataset=dataset,
@@ -307,6 +319,7 @@ class DecisionTreeScoreEngine:
         dataset: SelectedFeaturesDataset,
         scoring: str,
     ) -> DecisionTreeScoreResult:
+        """Compute one global cross-validation score."""
         X = dataset.X
         y = dataset.y
         groups = dataset.groups
@@ -334,6 +347,7 @@ class DecisionTreeScoreEngine:
         dataset: SelectedFeaturesDataset,
         metric_name: str,
     ) -> PerClassMetricResult:
+        """Compute a cross-validated per-class metric."""
         X = dataset.X
         y = dataset.y
         groups = dataset.groups
@@ -399,6 +413,7 @@ class DecisionTreeScoreEngine:
         decision_tree: DecisionTree,
         dataset: SelectedFeaturesDataset,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Return out-of-fold predictions and corresponding true labels."""
         X = dataset.X
         y = dataset.y
         groups = dataset.groups
@@ -419,19 +434,18 @@ class DecisionTreeScoreEngine:
             y_pred_all.extend(list(y_pred))
 
         return np.asarray(y_true_all), np.asarray(y_pred_all)
-    
 
     def evaluate_trained_tree(
-    self,
-    trained_decision_tree: TrainedDecisionTree,
-    test_dataset: SelectedFeaturesDataset,
-    normalize: str | None = "true",
-) -> DecisionTreeDetailedScoreResult:
+        self,
+        trained_decision_tree: TrainedDecisionTree,
+        test_dataset: SelectedFeaturesDataset,
+        normalize: str | None = "true",
+    ) -> DecisionTreeDetailedScoreResult:
         """
-        Évalue un arbre déjà entraîné sur un dataset de test indépendant.
+        Evaluate an already trained tree on an independent test dataset.
 
-        Contrairement à `full_scores`, cette méthode ne fait pas de cross-validation.
-        Elle suppose que `trained_decision_tree` est déjà entraîné.
+        Unlike ``full_scores``, this method does not perform cross-validation.
+        It assumes that ``trained_decision_tree`` has already been fitted.
         """
         if trained_decision_tree is None:
             raise ValueError("`trained_decision_tree` cannot be None.")
@@ -464,10 +478,16 @@ class DecisionTreeScoreEngine:
 
         y_pred = classifier.predict(X_test)
 
-        labels = list(np.unique(np.concatenate([
-            np.asarray(y_true),
-            np.asarray(y_pred),
-        ])))
+        labels = list(
+            np.unique(
+                np.concatenate(
+                    [
+                        np.asarray(y_true),
+                        np.asarray(y_pred),
+                    ]
+                )
+            )
+        )
 
         accuracy_value = float(np.mean(np.asarray(y_true) == np.asarray(y_pred)))
 

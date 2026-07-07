@@ -6,21 +6,22 @@ from preprocessing.step.base import PreprocessingStep
 
 class PreprocessingPipeline:
     """
-    Pipeline de preprocessing EEG optimisé.
+    Optimized EEG preprocessing pipeline.
 
-    Accepte maintenant :
+    Accepted inputs:
     - EEGRecordedData
     - EEGProcessedData
 
-    Si on applique un pipeline sur un EEG déjà processed, alors le nouvel
-    EEGProcessedData a pour source directe cet EEG processed.
+    When the pipeline is applied to an already processed EEG object, the newly
+    created EEGProcessedData uses that processed EEG object as its direct source.
 
-    Exemple :
+    Example
+    -------
         recorded
             -> processed_1(source=recorded)
             -> processed_2(source=processed_1)
 
-    On écrase donc bien la source logique par la dernière donnée EEG utilisée.
+    The logical source is therefore the last EEG object used as pipeline input.
     """
 
     def __init__(self, name: str, steps: list[PreprocessingStep]):
@@ -32,13 +33,16 @@ class PreprocessingPipeline:
 
     @property
     def name(self) -> str:
+        """Return the preprocessing pipeline name."""
         return self._name
 
     @property
     def steps(self) -> list[PreprocessingStep]:
+        """Return the preprocessing steps."""
         return self._steps
 
     def describe(self) -> dict:
+        """Return a serializable description of the preprocessing pipeline."""
         return {
             "pipeline_name": self.name,
             "steps": [step.describe() for step in self.steps],
@@ -46,18 +50,18 @@ class PreprocessingPipeline:
 
     def prepare(self, eeg_data: EEGData) -> None:
         """
-        Prépare toutes les steps sur un EEG source.
+        Prepare all preprocessing steps on a source EEG object.
 
-        eeg_data peut être :
+        ``eeg_data`` can be:
         - EEGRecordedData
         - EEGProcessedData
         """
-
         with eeg_data.loaded():
             for step in self.steps:
                 step.prepare(eeg_data)
 
     def clear_caches(self) -> None:
+        """Clear cached state from all preprocessing steps."""
         for step in self.steps:
             step.clear_cache()
 
@@ -69,22 +73,22 @@ class PreprocessingPipeline:
         prepare_steps: bool = True,
     ) -> EEGProcessedData:
         """
-        Calcule l'EEG preprocessé à partir de n'importe quel EEGData.
+        Compute a processed EEG object from any EEGData object.
 
-        Stratégie
-        ---------
-        1. charge l'EEG source si nécessaire
-        2. prépare éventuellement les steps
-        3. crée une seule copie de travail du Raw
-        4. applique les steps sur cette copie
-        5. retourne EEGProcessedData(source=eeg_data)
+        Strategy
+        --------
+        1. Load the source EEG if needed.
+        2. Optionally prepare all preprocessing steps.
+        3. Create a single working copy of the Raw object.
+        4. Apply each step to the working copy.
+        5. Return ``EEGProcessedData(source=eeg_data)``.
 
         Important
         ---------
-        Si eeg_data est déjà un EEGProcessedData, on ne remonte pas à sa source.
-        Le nouveau processed pointe directement vers eeg_data.
+        If ``eeg_data`` is already an EEGProcessedData, the method does not go
+        back to its source. The newly processed object points directly to
+        ``eeg_data``.
         """
-
         was_loaded_before = eeg_data.is_loaded
         eeg_data.load()
 

@@ -7,18 +7,19 @@ from eeg.signal import SpectralBand
 @dataclass(frozen=True)
 class SignalPPCAnalysisParameters:
     """
-    Paramètres du calcul de Pairwise Phase Consistency (PPC).
+    Parameters used to compute Pairwise Phase Consistency (PPC).
 
     Notes
     -----
-    - epoch_duration : durée (en secondes) de chaque epoch créé à partir du Raw.
-    - epoch_overlap  : chevauchement (en secondes) entre epochs.
-    - faverage       : si True, moyenne la connectivité dans chaque bande.
-    - mode           : mode spectral de MNE-Connectivity ('multitaper', 'fourier', 'cwt_morlet').
-    - mt_adaptive    : paramètre utile si mode='multitaper'.
-    - mt_low_bias    : paramètre utile si mode='multitaper'.
-    - n_jobs         : parallélisation.
+    - epoch_duration: duration, in seconds, of each epoch created from the raw signal.
+    - epoch_overlap: overlap, in seconds, between consecutive epochs.
+    - faverage: if True, averages connectivity values inside each frequency band.
+    - mode: spectral mode used by MNE-Connectivity ('multitaper', 'fourier', 'cwt_morlet').
+    - mt_adaptive: parameter used when mode='multitaper'.
+    - mt_low_bias: parameter used when mode='multitaper'.
+    - n_jobs: number of parallel jobs.
     """
+
     bands: tuple[SpectralBand, ...] = field(
         default_factory=lambda: (
             SpectralBand("delta", 1.0, 4.0),
@@ -42,16 +43,20 @@ class SignalPPCAnalysisParameters:
 
     @property
     def band_names(self) -> list[str]:
+        """Return the names of the configured frequency bands."""
         return [band.name for band in self.bands]
 
     @property
     def fmin(self) -> tuple[float, ...]:
+        """Return the lower frequency bounds of all bands."""
         return tuple(band.fmin for band in self.bands)
 
     @property
     def fmax(self) -> tuple[float, ...]:
+        """Return the upper frequency bounds of all bands."""
         return tuple(band.fmax for band in self.bands)
-    
+
+
 from dataclasses import dataclass
 from functools import cached_property
 
@@ -64,52 +69,56 @@ from eeg.data import EEGProcessedData
 @dataclass(frozen=True)
 class SignalPPCAnalysisResult:
     """
-    Résultat du calcul PPC.
+    Result of a PPC computation.
 
-    Expose :
-    - eeg : EEGProcessedData utilisé
-    - params : paramètres de calcul
-    - connectivity : objet MNE-Connectivity
-    - matrices par bande : facilement accessibles via band_matrix(...), theta_matrix, etc.
+    Exposes:
+    - eeg: EEGProcessedData object used for the computation.
+    - params: PPC computation parameters.
+    - connectivity: MNE-Connectivity object.
+    - band matrices: accessible through band_matrix(...), theta_matrix, etc.
 
-    Convention adoptée ici :
-    - chaque matrice PPC est symétrique
-    - la diagonale est mise à 0.0
+    Convention used here:
+    - each PPC matrix is symmetric;
+    - the diagonal is set to 0.0.
     """
+
     eeg: EEGProcessedData
     params: "SignalPPCAnalysisParameters"
     connectivity: Connectivity
 
     @property
     def channel_names(self) -> list[str]:
+        """Return the channel names stored in the connectivity object."""
         return list(self.connectivity.names)
 
     @property
     def n_channels(self) -> int:
+        """Return the number of EEG channels."""
         return len(self.channel_names)
 
     @property
     def band_names(self) -> list[str]:
+        """Return the frequency band names."""
         return self.params.band_names
 
     @cached_property
     def channel_name_to_index(self) -> dict[str, int]:
+        """Return a mapping from channel names to channel indices."""
         return {name: idx for idx, name in enumerate(self.channel_names)}
 
     @cached_property
     def dense_data_raw(self) -> np.ndarray:
         """
-        Retourne la connectivité dense telle que fournie par MNE.
+        Return the dense connectivity data as provided by MNE.
 
-        Shape attendu :
-        - (n_channels, n_channels, n_bands) si faverage=True
-        - parfois (n_channels, n_channels) si une seule bande
+        Expected shape:
+        - (n_channels, n_channels, n_bands) if faverage=True;
+        - sometimes (n_channels, n_channels) if only one band is used.
         """
         data = self.connectivity.get_data(output="dense")
         data = np.asarray(data, dtype=float)
 
         if data.ndim == 2:
-            # Cas : une seule bande
             data = data[:, :, np.newaxis]
 
         if data.ndim != 3:
@@ -129,17 +138,15 @@ class SignalPPCAnalysisResult:
     @staticmethod
     def _symmetrize_matrix(mat: np.ndarray, zero_diagonal: bool = True) -> np.ndarray:
         """
-        Rend explicitement la matrice symétrique.
+        Explicitly symmetrize a matrix.
 
-        Comme la PPC est une mesure symétrique, si une seule moitié de la matrice
-        contient l'information, on reconstruit une matrice complète.
+        Since PPC is a symmetric measure, if information is stored in only one
+        half of the matrix, this reconstructs the full matrix.
         """
         work = np.asarray(mat, dtype=float).copy()
 
-        # Reconstruit l'information si elle est stockée dans une seule moitié
         work = np.maximum(work, work.T)
 
-        # Stabilise numériquement la symétrie
         work = 0.5 * (work + work.T)
 
         if zero_diagonal:
@@ -150,8 +157,10 @@ class SignalPPCAnalysisResult:
     @cached_property
     def dense_data(self) -> np.ndarray:
         """
-        Retourne la connectivité dense symétrisée :
-        shape = (n_channels, n_channels, n_bands)
+        Return the symmetrized dense connectivity data.
+
+        Shape:
+            (n_channels, n_channels, n_bands)
         """
         data = self.dense_data_raw.copy()
 
@@ -162,6 +171,7 @@ class SignalPPCAnalysisResult:
 
     @cached_property
     def matrices_by_band(self) -> dict[str, np.ndarray]:
+        """Return one PPC matrix per frequency band."""
         n_bands_data = self.dense_data.shape[2]
         n_bands_params = len(self.band_names)
 
@@ -177,37 +187,37 @@ class SignalPPCAnalysisResult:
         }
 
     def band_matrix(self, band_name: str) -> np.ndarray:
-        """
-        Retourne la matrice PPC d'une bande donnée.
-        """
+        """Return the PPC matrix associated with a given frequency band."""
         if band_name not in self.matrices_by_band:
             raise ValueError(
                 f"Bande inconnue '{band_name}'. Bandes disponibles : {self.band_names}"
             )
+
         return self.matrices_by_band[band_name]
 
     def ppc_value(self, ch_name1: str, ch_name2: str, band_name: str) -> float:
         """
-        Retourne la valeur PPC entre deux canaux pour une bande donnée.
+        Return the PPC value between two channels for a given frequency band.
 
         Parameters
         ----------
         ch_name1 : str
-            Nom du premier canal.
+            Name of the first channel.
         ch_name2 : str
-            Nom du second canal.
+            Name of the second channel.
         band_name : str
-            Nom de la bande.
+            Name of the frequency band.
 
         Returns
         -------
         float
-            Valeur PPC.
+            PPC value.
         """
         if ch_name1 not in self.channel_name_to_index:
             raise ValueError(
                 f"Canal inconnu '{ch_name1}'. Canaux disponibles : {self.channel_names}"
             )
+
         if ch_name2 not in self.channel_name_to_index:
             raise ValueError(
                 f"Canal inconnu '{ch_name2}'. Canaux disponibles : {self.channel_names}"
@@ -216,57 +226,60 @@ class SignalPPCAnalysisResult:
         mat = self.band_matrix(band_name)
         i = self.channel_name_to_index[ch_name1]
         j = self.channel_name_to_index[ch_name2]
+
         return float(mat[i, j])
 
-    def band_vector_upper(self, band_name: str, include_diagonal: bool = False) -> np.ndarray:
-        """
-        Retourne les connexions de la matrice sous forme de vecteur
-        (triangle supérieur).
-        """
+    def band_vector_upper(
+        self,
+        band_name: str,
+        include_diagonal: bool = False,
+    ) -> np.ndarray:
+        """Return the upper-triangular connections of a band matrix as a vector."""
         mat = self.band_matrix(band_name)
         k = 0 if include_diagonal else 1
         i, j = np.triu_indices_from(mat, k=k)
+
         return mat[i, j]
 
-    def mean_band_connectivity(self, band_name: str, include_diagonal: bool = False) -> float:
-        """
-        Moyenne des connectivités de la bande sur le triangle supérieur.
-        """
+    def mean_band_connectivity(
+        self,
+        band_name: str,
+        include_diagonal: bool = False,
+    ) -> float:
+        """Return the mean upper-triangular connectivity for a given band."""
         values = self.band_vector_upper(band_name, include_diagonal=include_diagonal)
+
         return float(np.mean(values))
 
     def strongest_connections(
         self,
         band_name: str,
         n: int = 20,
-        include_diagonal: bool = False
+        include_diagonal: bool = False,
     ) -> list[tuple[str, str, float]]:
-        """
-        Retourne les n connexions les plus fortes d'une bande.
-        """
+        """Return the strongest connections for a given frequency band."""
         mat = self.band_matrix(band_name)
         k = 0 if include_diagonal else 1
         ii, jj = np.triu_indices_from(mat, k=k)
         values = mat[ii, jj]
 
         order = np.argsort(values)[::-1][:n]
+
         return [
             (self.channel_names[ii[idx]], self.channel_names[jj[idx]], float(values[idx]))
             for idx in order
         ]
 
     def is_band_symmetric(self, band_name: str, atol: float = 1e-12) -> bool:
-        """
-        Vérifie que la matrice d'une bande est bien symétrique.
-        """
+        """Return whether a band matrix is symmetric."""
         mat = self.band_matrix(band_name)
+
         return bool(np.allclose(mat, mat.T, atol=atol))
 
     def band_summary(self, band_name: str) -> dict[str, float | bool | tuple[int, int]]:
-        """
-        Petit résumé utile pour debug/inspection.
-        """
+        """Return a compact summary useful for debugging and inspection."""
         mat = self.band_matrix(band_name)
+
         return {
             "shape": mat.shape,
             "is_symmetric": self.is_band_symmetric(band_name),
@@ -278,52 +291,65 @@ class SignalPPCAnalysisResult:
 
     @property
     def delta_matrix(self) -> np.ndarray:
+        """Return the delta-band PPC matrix."""
         return self.band_matrix("delta")
 
     @property
     def theta_matrix(self) -> np.ndarray:
+        """Return the theta-band PPC matrix."""
         return self.band_matrix("theta")
 
     @property
     def alpha_matrix(self) -> np.ndarray:
+        """Return the alpha-band PPC matrix."""
         return self.band_matrix("alpha")
 
     @property
     def beta_matrix(self) -> np.ndarray:
+        """Return the beta-band PPC matrix."""
         return self.band_matrix("beta")
 
     @property
     def gamma_matrix(self) -> np.ndarray:
+        """Return the gamma-band PPC matrix."""
         return self.band_matrix("gamma")
 
     @property
     def full_matrix(self) -> np.ndarray:
+        """Return the full-band PPC matrix."""
         return self.band_matrix("full")
 
     @property
     def delta_mean(self) -> float:
+        """Return the mean delta-band PPC connectivity."""
         return self.mean_band_connectivity("delta")
 
     @property
     def theta_mean(self) -> float:
+        """Return the mean theta-band PPC connectivity."""
         return self.mean_band_connectivity("theta")
 
     @property
     def alpha_mean(self) -> float:
+        """Return the mean alpha-band PPC connectivity."""
         return self.mean_band_connectivity("alpha")
 
     @property
     def beta_mean(self) -> float:
+        """Return the mean beta-band PPC connectivity."""
         return self.mean_band_connectivity("beta")
 
     @property
     def gamma_mean(self) -> float:
+        """Return the mean gamma-band PPC connectivity."""
         return self.mean_band_connectivity("gamma")
 
     @property
     def full_mean(self) -> float:
+        """Return the mean full-band PPC connectivity."""
         return self.mean_band_connectivity("full")
-    
+
+
 from dataclasses import dataclass
 
 from features.config import FeatureExtractionConfig
@@ -331,14 +357,13 @@ from features.config import FeatureExtractionConfig
 
 @dataclass(frozen=True)
 class PPCAnalysisEngineParametersFactory:
+    """Factory used to build PPC analysis parameters from a global config."""
 
     @staticmethod
     def build_ppc_engine_parameters(
-        config: FeatureExtractionConfig
+        config: FeatureExtractionConfig,
     ) -> SignalPPCAnalysisParameters:
-        """
-        Construit les paramètres PPC à partir de ton config global.
-        """
+        """Build PPC parameters from the global feature extraction config."""
         epoch_duration = config.ppc_epoch_duration
         epoch_overlap = config.ppc_epoch_overlap
         mode = config.ppc_mode
@@ -356,7 +381,7 @@ class PPCAnalysisEngineParametersFactory:
             mode=mode,
             n_jobs=n_jobs,
         )
-    
+
 
 import mne
 from mne_connectivity import Connectivity, spectral_connectivity_epochs
@@ -365,17 +390,17 @@ from eeg.data import EEGProcessedData
 
 
 class SignalPPCAnalysisEngine:
-    """
-    Engine de calcul PPC à partir d'un EEGProcessedData.
-    """
+    """Engine used to compute PPC from an EEGProcessedData object."""
 
     def __init__(self, params: SignalPPCAnalysisParameters):
         self.params = params
 
     def _compute_epochs(self, raw: mne.io.Raw) -> mne.Epochs:
         """
-        Découpe le signal continu en epochs fixes, nécessaire pour le calcul
-        de connectivité spectrale avec MNE-Connectivity.
+        Split the continuous signal into fixed-length epochs.
+
+        This is required by MNE-Connectivity for spectral connectivity
+        computation.
         """
         epochs = mne.make_fixed_length_epochs(
             raw,
@@ -395,9 +420,7 @@ class SignalPPCAnalysisEngine:
         return epochs
 
     def _compute_connectivity(self, epochs: mne.Epochs) -> Connectivity:
-        """
-        Calcule la PPC pour toutes les paires de capteurs.
-        """
+        """Compute PPC for all sensor pairs."""
         conn: Connectivity = spectral_connectivity_epochs(
             data=epochs,
             method="ppc",
@@ -407,17 +430,16 @@ class SignalPPCAnalysisEngine:
             faverage=self.params.faverage,
             mt_adaptive=self.params.mt_adaptive,
             mt_low_bias=self.params.mt_low_bias,
-            indices=None,   # all-to-all
+            indices=None,
             block_size=self.params.block_size,
             n_jobs=self.params.n_jobs,
             verbose=False,
         )
+
         return conn
 
     def compute(self, eeg: EEGProcessedData) -> SignalPPCAnalysisResult:
-        """
-        Lance le calcul complet et retourne le résultat.
-        """
+        """Run the full PPC computation and return the result."""
         epochs = self._compute_epochs(eeg.raw)
         connectivity = self._compute_connectivity(epochs)
 
@@ -427,19 +449,18 @@ class SignalPPCAnalysisEngine:
             connectivity=connectivity,
         )
 
-        # Force l'évaluation ici pour détecter les erreurs de shape tôt
         _ = result.dense_data
 
         return result
-    
+
+
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class PPCVisualisationParameters:
-    """
-    Paramètres de visualisation.
-    """
+    """Parameters used to configure PPC visualizations."""
+
     figsize_heatmap: tuple[float, float] = (10, 8)
     figsize_circle: tuple[float, float] = (10, 10)
     cmap_heatmap: str = "viridis"
@@ -463,9 +484,9 @@ from mne_connectivity.viz import plot_connectivity_circle, plot_sensors_connecti
 
 class PPCVisualisationEngine:
     """
-    Visualisation des résultats PPC.
+    Visualization engine for PPC results.
 
-    Méthodes utiles :
+    Useful methods:
     - plot_band_heatmap(...)
     - plot_band_circle(...)
     - plot_band_sensor_graph(...)
@@ -483,28 +504,37 @@ class PPCVisualisationEngine:
 
     @cached_property
     def info(self):
+        """Return the MNE info object associated with the EEG data."""
         return self.result.eeg.info
 
     @cached_property
     def channel_names(self) -> list[str]:
+        """Return the channel names used in the PPC result."""
         return self.result.channel_names
 
     def _get_band_matrix(self, band_name: str) -> np.ndarray:
+        """Return the PPC matrix for a given frequency band."""
         return self.result.band_matrix(band_name)
 
-    def _compute_node_strength(self, mat: np.ndarray, zero_diagonal: bool = True) -> np.ndarray:
-        """
-        Force de noeud = somme des connectivités de chaque électrode.
-        """
+    def _compute_node_strength(
+        self,
+        mat: np.ndarray,
+        zero_diagonal: bool = True,
+    ) -> np.ndarray:
+        """Compute node strength as the sum of each electrode connectivity values."""
         work = mat.copy()
+
         if zero_diagonal:
             np.fill_diagonal(work, 0.0)
+
         return work.sum(axis=1)
 
-    def _threshold_matrix(self, mat: np.ndarray, quantile: float | None = None) -> np.ndarray:
-        """
-        Seuil sur les connexions les plus fortes pour simplifier l'affichage.
-        """
+    def _threshold_matrix(
+        self,
+        mat: np.ndarray,
+        quantile: float | None = None,
+    ) -> np.ndarray:
+        """Keep only the strongest connections to simplify visualization."""
         quantile = self.params.threshold_quantile if quantile is None else quantile
 
         work = mat.copy()
@@ -515,12 +545,11 @@ class PPCVisualisationEngine:
 
         thr = np.quantile(upper, quantile)
         work[work < thr] = 0.0
+
         return work
 
     def plot_band_heatmap(self, band_name: str, mask_diagonal: bool = False):
-        """
-        Heatmap de la matrice PPC complète.
-        """
+        """Plot the full PPC matrix as a heatmap."""
         mat = self._get_band_matrix(band_name).copy()
 
         if mask_diagonal:
@@ -556,9 +585,7 @@ class PPCVisualisationEngine:
         return fig, ax
 
     def plot_band_circle(self, band_name: str, n_lines: int | None = None):
-        """
-        Graphe circulaire des plus fortes connexions.
-        """
+        """Plot the strongest connections as a circular graph."""
         mat = self._get_band_matrix(band_name)
         n_lines = self.params.n_circle_lines if n_lines is None else n_lines
 
@@ -596,9 +623,7 @@ class PPCVisualisationEngine:
         n_lines: int | None = None,
         threshold_quantile: float | None = None,
     ):
-        """
-        Graphe 3D des capteurs avec les connexions fortes.
-        """
+        """Plot a 3D sensor graph showing the strongest connections."""
         mat = self._get_band_matrix(band_name)
         mat_thr = self._threshold_matrix(mat, quantile=threshold_quantile)
         n_lines = self.params.sensor_n_lines if n_lines is None else n_lines
@@ -618,8 +643,10 @@ class PPCVisualisationEngine:
 
     def plot_band_degree_topomap(self, band_name: str, zero_diagonal: bool = True):
         """
-        Topomap de la force de noeud :
-        somme des connectivités de chaque électrode avec les autres.
+        Plot a node-strength topomap.
+
+        Node strength is defined as the sum of the connectivity values between
+        each electrode and all other electrodes.
         """
         mat = self._get_band_matrix(band_name)
         node_strength = self._compute_node_strength(mat, zero_diagonal=zero_diagonal)
@@ -641,19 +668,16 @@ class PPCVisualisationEngine:
         return fig, ax
 
     def plot_band_summary(self, band_name: str):
-        """
-        Affiche successivement les visualisations les plus utiles.
-        """
+        """Display the most useful visualizations for a given frequency band."""
         outputs = {}
         outputs["heatmap"] = self.plot_band_heatmap(band_name)
         outputs["circle"] = self.plot_band_circle(band_name)
         outputs["topomap"] = self.plot_band_degree_topomap(band_name)
+
         return outputs
 
     def plot_summary(self, bands: list[str] | None = None):
-        """
-        Affiche une synthèse pour plusieurs bandes.
-        """
+        """Display a visualization summary for several frequency bands."""
         bands = self.result.band_names if bands is None else bands
         outputs = {}
 

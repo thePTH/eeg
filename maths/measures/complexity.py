@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+
 import numpy as np
 from scipy.spatial.distance import cdist
 
@@ -8,7 +9,7 @@ from maths.tools import EmbeddingTools, SignalTools
 
 
 class ComplexityMeasures:
-    """Mesures d'entropie et de complexité."""
+    """Entropy and complexity measures."""
 
     @staticmethod
     def permutation_entropy(
@@ -17,18 +18,20 @@ class ComplexityMeasures:
         delay: int = 1,
         normalize: bool = True,
     ) -> float:
-        """
-        Implémentation standard de la permutation entropy de Bandt-Pompe.
-        """
+        """Compute standard Bandt-Pompe permutation entropy."""
         n = len(x)
 
         if order < 2:
             raise ValueError("order doit être >= 2.")
+
         if n < (order - 1) * delay + 1:
             return 0.0
 
         embedded = np.array(
-            [x[i:i + order * delay:delay] for i in range(n - (order - 1) * delay)]
+            [
+                x[i : i + order * delay : delay]
+                for i in range(n - (order - 1) * delay)
+            ]
         )
         perms = np.argsort(embedded, axis=1)
         _, counts = np.unique(perms, axis=0, return_counts=True)
@@ -43,9 +46,7 @@ class ComplexityMeasures:
 
     @staticmethod
     def sample_entropy(x: np.ndarray, m: int = 2, r: float | None = None) -> float:
-        """
-        Sample entropy standard.
-        """
+        """Compute standard sample entropy."""
         x = np.asarray(x, dtype=float)
         n = len(x)
 
@@ -59,6 +60,7 @@ class ComplexityMeasures:
             emb = EmbeddingTools.sliding_embed(x, mm, 1)
             dist = cdist(emb, emb, metric="chebyshev")
             count = np.sum(dist <= r, axis=0) - 1
+
             return np.sum(count)
 
         a = _phi(m + 1)
@@ -70,10 +72,12 @@ class ComplexityMeasures:
         return float(-np.log(a / b))
 
     @staticmethod
-    def approximate_entropy(x: np.ndarray, m: int = 2, r: float | None = None) -> float:
-        """
-        Approximate entropy standard.
-        """
+    def approximate_entropy(
+        x: np.ndarray,
+        m: int = 2,
+        r: float | None = None,
+    ) -> float:
+        """Compute standard approximate entropy."""
         x = np.asarray(x, dtype=float)
         n = len(x)
 
@@ -87,15 +91,14 @@ class ComplexityMeasures:
             emb = EmbeddingTools.sliding_embed(x, mm, 1)
             dist = cdist(emb, emb, metric="chebyshev")
             c = np.mean(dist <= r, axis=0)
+
             return float(np.mean(np.log(c)))
 
         return float(_phi(m) - _phi(m + 1))
 
     @staticmethod
     def lz_complexity(x: np.ndarray) -> float:
-        """
-        Lempel-Ziv Complexity normalisée.
-        """
+        """Compute normalized Lempel-Ziv complexity."""
         b = SignalTools.normalized_binary_sequence(x)
         s = "".join(map(str, b.tolist()))
         n = len(s)
@@ -114,18 +117,23 @@ class ComplexityMeasures:
 
             if s[i + k] == s[l + k]:
                 k += 1
+
                 if l + k >= n:
                     c += 1
                     break
             else:
                 if k > k_max:
                     k_max = k
+
                 i += 1
+
                 if i == l:
                     c += 1
                     l += k_max
+
                     if l >= n:
                         break
+
                     i = 0
                     k = 1
                     k_max = 1
@@ -142,12 +150,12 @@ class ComplexityMeasures:
         r: float | None = None,
     ) -> float:
         """
-        Approximation robuste de la state-space correlation entropy.
+        Compute a robust approximation of state-space correlation entropy.
 
-        Version pratique :
-        - reconstruction d'état,
-        - probabilité de voisinage sous rayon r,
-        - entropie moyenne locale.
+        Practical version:
+        - state-space reconstruction;
+        - neighborhood probability under radius r;
+        - average local entropy.
         """
         y = EmbeddingTools.sliding_embed(x, emb_dim, tau)
         d = cdist(y, y, metric="euclidean")

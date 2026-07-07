@@ -13,17 +13,22 @@ import pandas as pd
 
 @dataclass(frozen=True, kw_only=True)
 class StatisticalResult(ABC):
+    """Base class for all statistical results."""
+
     target: str
     key: str
     test_name: str
 
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         raise NotImplementedError
 
 
 @dataclass(frozen=True, kw_only=True)
 class ScalarStatisticalResult(StatisticalResult):
+    """Statistical result represented by one statistic and one p-value."""
+
     statistic: float
     p_value: float
     n_observations: int
@@ -31,11 +36,14 @@ class ScalarStatisticalResult(StatisticalResult):
 
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "scalar"
 
 
 @dataclass(frozen=True, kw_only=True)
 class PairwiseStatisticalResult(ScalarStatisticalResult):
+    """Statistical result comparing two samples."""
+
     n_x: int = 0
     n_y: int = 0
     x_name: str = ""
@@ -43,15 +51,19 @@ class PairwiseStatisticalResult(ScalarStatisticalResult):
 
     @property
     def label(self) -> str:
+        """Return a human-readable pairwise comparison label."""
         return f"{self.x_name} vs {self.y_name}"
 
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "pairwise"
 
 
 @dataclass(frozen=True, kw_only=True)
 class OneWayANOVAResult(ScalarStatisticalResult):
+    """Statistical result for a one-way ANOVA."""
+
     factor_name: str = ""
     group_sizes: dict[str, int] = field(default_factory=dict)
     df_between: int = 0
@@ -60,15 +72,19 @@ class OneWayANOVAResult(ScalarStatisticalResult):
 
     @property
     def label(self) -> str:
+        """Return a human-readable ANOVA label."""
         return f"{self.target} ~ {self.factor_name}"
 
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "one_way_anova"
 
 
 @dataclass(frozen=True, kw_only=True)
 class FactorialEffectResult:
+    """Statistical result for one effect in a factorial ANOVA."""
+
     effect_name: str
     statistic: float
     p_value: float
@@ -80,6 +96,8 @@ class FactorialEffectResult:
 
 @dataclass(frozen=True, kw_only=True)
 class TwoWayANOVAResult(StatisticalResult):
+    """Statistical result for a two-way ANOVA."""
+
     dependent_name: str
     factor_a_name: str
     factor_b_name: str
@@ -89,10 +107,12 @@ class TwoWayANOVAResult(StatisticalResult):
 
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "factorial"
 
     @property
     def label(self) -> str:
+        """Return a human-readable factorial ANOVA label."""
         return f"{self.dependent_name} ~ {self.factor_a_name} * {self.factor_b_name}"
 
 
@@ -102,6 +122,8 @@ class TwoWayANOVAResult(StatisticalResult):
 
 @dataclass(frozen=True, kw_only=True)
 class CorrectedScalarMixin:
+    """Mixin adding multiple-comparison correction fields to scalar results."""
+
     p_value_corrected: float = 1.0
     correction_method: str = ""
     alpha: float = 0.05
@@ -110,22 +132,31 @@ class CorrectedScalarMixin:
 
 @dataclass(frozen=True, kw_only=True)
 class CorrectedScalarStatisticalResult(ScalarStatisticalResult, CorrectedScalarMixin):
+    """Corrected scalar statistical result."""
+
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "scalar_corrected"
 
 
 @dataclass(frozen=True, kw_only=True)
 class CorrectedPairwiseStatisticalResult(PairwiseStatisticalResult, CorrectedScalarMixin):
+    """Corrected pairwise statistical result."""
+
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "pairwise_corrected"
 
 
 @dataclass(frozen=True, kw_only=True)
 class CorrectedOneWayANOVAResult(OneWayANOVAResult, CorrectedScalarMixin):
+    """Corrected one-way ANOVA statistical result."""
+
     @property
     def result_kind(self) -> str:
+        """Return the statistical result kind."""
         return "one_way_anova_corrected"
 
 
@@ -135,6 +166,8 @@ class CorrectedOneWayANOVAResult(OneWayANOVAResult, CorrectedScalarMixin):
 
 @dataclass(frozen=True, kw_only=True)
 class PostHocComparisonResult:
+    """Result of one post-hoc group comparison."""
+
     group_a: str
     group_b: str
     mean_diff: float
@@ -146,13 +179,17 @@ class PostHocComparisonResult:
 
 @dataclass(frozen=True, kw_only=True)
 class PostHocResultSet:
+    """Collection of post-hoc comparisons for one target and key."""
+
     key: str
     target: str
     method: str
     comparisons: list[PostHocComparisonResult]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Convert post-hoc comparisons to a DataFrame."""
         rows: list[dict[str, Any]] = []
+
         for cmp in self.comparisons:
             rows.append(
                 {
@@ -168,6 +205,7 @@ class PostHocResultSet:
                     "reject_null": cmp.reject_null,
                 }
             )
+
         return pd.DataFrame(rows)
 
 
@@ -177,19 +215,28 @@ class PostHocResultSet:
 
 @dataclass(frozen=True, kw_only=True)
 class StatisticalResultSet:
+    """Collection of statistical results for one test and one target."""
+
     results: dict[str, StatisticalResult]
     test_name: str
     target: str
 
     def keys(self) -> list[str]:
+        """Return the result keys."""
         return list(self.results.keys())
 
     def is_scalar_only(self) -> bool:
-        return all(isinstance(result, ScalarStatisticalResult) for result in self.results.values())
+        """Return whether all results are scalar statistical results."""
+        return all(
+            isinstance(result, ScalarStatisticalResult)
+            for result in self.results.values()
+        )
 
     def scalar_p_values(self) -> dict[str, float]:
+        """Return scalar p-values indexed by result key."""
         if not self.is_scalar_only():
             raise TypeError("scalar_p_values is only available for scalar result sets")
+
         return {
             key: result.p_value
             for key, result in self.results.items()
@@ -197,6 +244,7 @@ class StatisticalResultSet:
         }
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Convert the statistical result set to a DataFrame."""
         rows: list[dict[str, Any]] = []
 
         for key, result in self.results.items():
@@ -281,11 +329,13 @@ class StatisticalResultSet:
 
 @dataclass(frozen=True, kw_only=True)
 class CorrectedStatisticalResultSet:
+    """Collection of corrected statistical results."""
+
     results: dict[
         str,
         CorrectedScalarStatisticalResult
         | CorrectedPairwiseStatisticalResult
-        | CorrectedOneWayANOVAResult
+        | CorrectedOneWayANOVAResult,
     ]
     test_name: str
     target: str
@@ -294,9 +344,11 @@ class CorrectedStatisticalResultSet:
     family_name: str
 
     def keys(self) -> list[str]:
+        """Return the corrected result keys."""
         return list(self.results.keys())
 
     def to_dataframe(self) -> pd.DataFrame:
+        """Convert the corrected result set to a DataFrame."""
         rows: list[dict[str, Any]] = []
 
         for key, result in self.results.items():
@@ -344,11 +396,14 @@ class CorrectedStatisticalResultSet:
 
 @dataclass(frozen=True, kw_only=True)
 class StatisticalAnalysisOutcome:
+    """Full statistical analysis outcome, including optional corrections and post-hoc results."""
+
     primary_results: StatisticalResultSet
     corrected_results: CorrectedStatisticalResultSet | None = None
     posthoc_results: dict[str, PostHocResultSet] | None = None
 
     def to_dataframes(self) -> dict[str, pd.DataFrame]:
+        """Convert all available statistical outputs to DataFrames."""
         payload = {
             "primary_results": self.primary_results.to_dataframe(),
         }
@@ -359,7 +414,10 @@ class StatisticalAnalysisOutcome:
         if self.posthoc_results is not None:
             payload["posthoc_results"] = (
                 pd.concat(
-                    [result.to_dataframe() for result in self.posthoc_results.values()],
+                    [
+                        result.to_dataframe()
+                        for result in self.posthoc_results.values()
+                    ],
                     ignore_index=True,
                 )
                 if self.posthoc_results

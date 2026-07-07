@@ -22,11 +22,11 @@ RawLoader = Callable[[], mne.io.Raw]
 
 class EEGData(ABC):
     """
-    Classe racine représentant une donnée EEG.
+    Base class representing EEG data.
 
-    Supporte un mode lazy :
-    - soit le Raw est déjà disponible ;
-    - soit il est absent mais l'objet sait le reconstruire via `_raw_loader`.
+    This class supports lazy loading:
+    - the raw MNE object can already be available;
+    - or it can be missing and reconstructed later through `_raw_loader`.
     """
 
     def __init__(
@@ -42,21 +42,26 @@ class EEGData(ABC):
 
     @property
     def sampling_frequency(self) -> float:
+        """Return the EEG sampling frequency."""
         return self._sampling_frequency
 
     @property
     def is_loaded(self) -> bool:
+        """Return whether the raw EEG data is currently loaded."""
         return self._raw is not None
 
     @property
     def can_reload(self) -> bool:
+        """Return whether this EEG object can reload its raw data."""
         return self._raw_loader is not None
 
     @property
     def cache_key(self) -> str:
+        """Return a unique cache key for this EEG object."""
         return f"{type(self).__name__}:{id(self)}"
 
     def load(self) -> Self:
+        """Load the raw EEG data into memory and return the current object."""
         if self._raw is None:
             if self._raw_loader is None:
                 raise RuntimeError(
@@ -70,12 +75,15 @@ class EEGData(ABC):
         return self
 
     def unload(self) -> None:
+        """Unload the raw EEG data from memory."""
         self._raw = None
 
     @contextmanager
     def loaded(self) -> Iterator[mne.io.Raw]:
+        """Context manager ensuring that raw EEG data is loaded during use."""
         was_loaded = self.is_loaded
         self.load()
+
         try:
             yield self.raw
         finally:
@@ -84,27 +92,33 @@ class EEGData(ABC):
 
     @property
     def raw(self) -> mne.io.Raw:
+        """Return the loaded raw EEG object."""
         if self._raw is None:
             raise RuntimeError(
                 "Raw data is not loaded. Call .load() first or use 'with eeg.loaded()'."
             )
+
         return self._raw
 
     @property
     def data(self):
+        """Return the raw EEG data array."""
         with self.loaded() as raw:
             return raw.get_data()
 
     @property
     def signal_names(self) -> list[str]:
+        """Return the EEG channel names."""
         with self.loaded() as raw:
             return list(raw.ch_names)
 
     @property
     def signals(self) -> list[SampledSignal]:
+        """Return all EEG channels as sampled signals."""
         return list(self.iter_signals())
 
     def iter_signals(self) -> Iterator[SampledSignal]:
+        """Iterate over EEG channels as sampled signals."""
         with self.loaded() as raw:
             data = raw.get_data()
             ch_names = list(raw.ch_names)
@@ -118,10 +132,12 @@ class EEGData(ABC):
 
     @property
     def info(self):
+        """Return the MNE raw info object."""
         with self.loaded() as raw:
             return raw.info
 
     def _copy_kwargs(self) -> dict:
+        """Return the keyword arguments required to copy this EEG object."""
         return {
             "raw": self._raw.copy() if self._raw is not None else None,
             "sampling_frequency": self.sampling_frequency,
@@ -129,23 +145,25 @@ class EEGData(ABC):
         }
 
     def copy(self) -> Self:
+        """Return a copy of this EEG object."""
         return type(self)(**self._copy_kwargs())
 
     def update_raw(self, new_raw: mne.io.Raw, *, copy_raw: bool = False) -> Self:
+        """Return a copy of this EEG object with a new raw object."""
         kwargs = self._copy_kwargs()
         kwargs["raw"] = new_raw.copy() if copy_raw else new_raw
         kwargs["raw_loader"] = None
+
         return type(self)(**kwargs)
 
     def plot(self):
+        """Plot the raw EEG data."""
         with self.loaded() as raw:
             raw.plot(verbose=False)
 
 
 class EEGRecordedData(EEGData):
-    """
-    EEG brut associé à un participant.
-    """
+    """Raw EEG data associated with a participant."""
 
     def __init__(
         self,
@@ -164,27 +182,32 @@ class EEGRecordedData(EEGData):
 
     @property
     def subject(self) -> Participant:
+        """Return the participant associated with this recording."""
         return self._subject
 
     @property
     def cache_key(self) -> str:
+        """Return a stable cache key based on the participant identifier."""
         return f"recorded:{self.subject.id}"
 
     def _copy_kwargs(self) -> dict:
+        """Return the keyword arguments required to copy this recording."""
         kwargs = super()._copy_kwargs()
         kwargs["subject"] = self.subject
+
         return kwargs
 
 
 class EEGProcessedData(EEGData):
     """
-    EEG après preprocessing.
+    EEG data obtained after preprocessing.
 
-    La source peut être :
-    - un EEGRecordedData ;
-    - un autre EEGProcessedData.
+    The source can be:
+    - an EEGRecordedData object;
+    - another EEGProcessedData object.
 
-    Cela permet de chaîner plusieurs preprocessings ou de splitter un EEG déjà processed.
+    This allows preprocessing pipelines to be chained or already processed EEG
+    recordings to be split into smaller windows.
     """
 
     def __init__(
@@ -205,6 +228,7 @@ class EEGProcessedData(EEGData):
 
     @staticmethod
     def _normalize_pipeline_name(pipeline_name: PipelineName | str) -> str:
+        """Normalize a pipeline name to its string representation."""
         if isinstance(pipeline_name, PipelineName):
             return pipeline_name.value
 
@@ -215,30 +239,34 @@ class EEGProcessedData(EEGData):
 
     @property
     def pipeline_name(self) -> str:
+        """Return the preprocessing pipeline name."""
         return self._pipeline_name
 
     @property
     def source(self) -> EEGData:
+        """Return the source EEG object used to create this processed EEG."""
         return self._source
 
     @property
     def cache_key(self) -> str:
+        """Return a cache key based on the source and pipeline name."""
         return f"processed:{self.source.cache_key}:{self.pipeline_name}"
 
     def _copy_kwargs(self) -> dict:
+        """Return the keyword arguments required to copy this processed EEG."""
         kwargs = super()._copy_kwargs()
         kwargs["source"] = self.source
         kwargs["pipeline_name"] = self.pipeline_name
+
         return kwargs
 
 
 class EEGRecordedDataProvider:
-    """
-    Provider chargé de construire les EEG bruts à partir d'un dossier BIDS.
-    """
+    """Provider used to build raw EEG recordings from a BIDS directory."""
 
     @staticmethod
     def _extract_subject(row: dict) -> Participant:
+        """Extract a participant object from a participants.tsv row."""
         participant_id = row["participant_id"].split("-")[1]
         gender = row["Gender"]
         age = int(row["Age"])
@@ -255,6 +283,7 @@ class EEGRecordedDataProvider:
 
     @staticmethod
     def _build_bids_path(subject: Participant, root: Path) -> BIDSPath:
+        """Build the BIDS path associated with a participant."""
         return BIDSPath(
             subject=subject.id,
             task="eyesclosed",
@@ -264,6 +293,8 @@ class EEGRecordedDataProvider:
 
     @staticmethod
     def _make_raw_loader(subject: Participant, root: Path) -> RawLoader:
+        """Create a lazy raw loader for a participant recording."""
+
         def loader() -> mne.io.Raw:
             bids_path = EEGRecordedDataProvider._build_bids_path(subject, root)
             raw = read_raw_bids(bids_path=bids_path, verbose=False)
@@ -281,6 +312,7 @@ class EEGRecordedDataProvider:
         root: Path,
         load_data: bool = True,
     ) -> EEGRecordedData:
+        """Extract one EEG recording from the BIDS directory."""
         bids_path = EEGRecordedDataProvider._build_bids_path(subject, root)
         raw_preview: mne.io.Raw = read_raw_bids(bids_path=bids_path, verbose=False)
 
@@ -302,6 +334,7 @@ class EEGRecordedDataProvider:
 
     @staticmethod
     def build(data_file_path: str, load_data: bool = True) -> list[EEGRecordedData]:
+        """Build all recorded EEG objects from a BIDS dataset directory."""
         recordings: list[EEGRecordedData] = []
         root = Path(data_file_path)
 
@@ -324,9 +357,9 @@ class EEGRecordedDataProvider:
 
 class EEGDataHelper:
     """
-    Helper générique pour manipuler EEGRecordedData ou EEGProcessedData.
+    Generic helper for EEGRecordedData and EEGProcessedData objects.
 
-    Les fonctions de split retournent toujours des EEGProcessedData.
+    Split methods always return EEGProcessedData objects.
     """
 
     @staticmethod
@@ -336,6 +369,7 @@ class EEGDataHelper:
         *,
         pipeline_name: str = "updated_raw",
     ) -> EEGProcessedData:
+        """Create a processed EEG object from an existing EEG object and new raw data."""
         return EEGProcessedData(
             raw=new_raw,
             source=eeg,
@@ -350,15 +384,11 @@ class EEGDataHelper:
         pipeline_name: str = "split",
     ) -> Iterator[EEGProcessedData]:
         """
-        Découpe un EEG en fenêtres.
+        Split an EEG recording into fixed-length windows.
 
-        Retourne toujours :
-            EEGProcessedData(source=eeg)
-
-        Donc si l'entrée est un EEGProcessedData, la source de chaque split est cet EEG
-        processed d'origine.
+        The returned objects are always EEGProcessedData instances using the
+        input EEG object as their source.
         """
-
         with eeg.loaded() as raw:
             total_duration = float(raw.times[-1])
 
@@ -391,6 +421,7 @@ class EEGDataHelper:
         window_seconds: int = 60,
         pipeline_name: str = "split",
     ) -> list[EEGProcessedData]:
+        """Return all fixed-length EEG windows as a list."""
         return list(
             EEGDataHelper.iter_split(
                 eeg=eeg,
@@ -402,6 +433,7 @@ class EEGDataHelper:
 
     @staticmethod
     def _get_raw_without_loading(eeg: EEGData) -> mne.io.Raw:
+        """Return a non-preloaded raw object without loading it into memory."""
         if eeg._raw is not None:
             raw = eeg._raw
         elif eeg._raw_loader is not None:
@@ -427,11 +459,10 @@ class EEGDataHelper:
         pipeline_name: str = "split_lazy",
     ) -> Iterator[EEGProcessedData]:
         """
-        Découpe un EEG en fenêtres sans charger les données en RAM.
+        Split an EEG recording into windows without loading the data into RAM.
 
-        Retourne toujours des EEGProcessedData.
+        The returned objects are always EEGProcessedData instances.
         """
-
         raw = EEGDataHelper._get_raw_without_loading(eeg)
 
         sfreq = float(raw.info["sfreq"])
@@ -475,6 +506,7 @@ class EEGDataHelper:
         window_seconds: int = 60,
         pipeline_name: str = "split_lazy",
     ) -> list[EEGProcessedData]:
+        """Return all lazy fixed-length EEG windows as a list."""
         return list(
             EEGDataHelper.iter_split_lazy(
                 eeg=eeg,
@@ -487,10 +519,11 @@ class EEGDataHelper:
     @staticmethod
     def get_recorded_source(eeg: EEGData) -> EEGRecordedData:
         """
-        Remonte la chaîne des sources jusqu'au EEGRecordedData initial.
-        Utile pour retrouver le participant.
-        """
+        Traverse the source chain until the original recorded EEG object is found.
 
+        This is useful to recover the participant associated with processed EEG
+        data.
+        """
         current = eeg
 
         while isinstance(current, EEGProcessedData):
@@ -505,15 +538,16 @@ class EEGDataHelper:
 
     @staticmethod
     def get_subject(eeg: EEGData) -> Participant:
+        """Return the participant associated with an EEG object."""
         return EEGDataHelper.get_recorded_source(eeg).subject
 
 
 class EEGRecordedDataHelper:
     """
-    Alias de compatibilité.
+    Backward-compatible alias for EEG data helper methods.
 
-    Les méthodes de split retournent maintenant des EEGProcessedData,
-    même si l'entrée est un EEGRecordedData.
+    Split methods now return EEGProcessedData objects, even when the input is an
+    EEGRecordedData object.
     """
 
     update_raw = EEGDataHelper.update_raw
@@ -524,6 +558,7 @@ class EEGRecordedDataHelper:
 
     @staticmethod
     def _copy_participant_with_tag(participant: Participant, tag: str) -> Participant:
+        """Return a copy of a participant with an additional tag."""
         return Participant(
             id=participant.id,
             gender=participant.gender,
@@ -535,6 +570,7 @@ class EEGRecordedDataHelper:
 
     @staticmethod
     def _copy_eeg_with_tag(eeg: EEGRecordedData, tag: str) -> EEGRecordedData:
+        """Return a copy of a recorded EEG object with a tagged participant."""
         tagged_subject = EEGRecordedDataHelper._copy_participant_with_tag(
             eeg.subject,
             tag,
@@ -550,14 +586,13 @@ class EEGRecordedDataHelper:
 
 class EEGProcessedDataIO:
     """
-    I/O optimisé pour EEGProcessedData.
+    Optimized I/O utilities for EEGProcessedData objects.
 
-    Structure créée
-    ----------------
-    path/
-    └── sub-<id>-rec-XX/
-        ├── raw.fif.gz
-        └── metadata.json
+    Created structure:
+        path/
+        └── sub-<id>-rec-XX/
+            ├── raw.fif.gz
+            └── metadata.json
     """
 
     RAW_FILENAME = "raw.fif.gz"
@@ -569,6 +604,7 @@ class EEGProcessedDataIO:
         root: Path,
         subject_id: str,
     ) -> tuple[Path, str]:
+        """Build the next available export folder for a subject."""
         subject_prefix = f"sub-{subject_id}-rec-"
 
         existing_indices = []
@@ -594,6 +630,7 @@ class EEGProcessedDataIO:
         *,
         overwrite: bool = False,
     ) -> Path:
+        """Export a processed EEG object to disk."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
@@ -636,6 +673,7 @@ class EEGProcessedDataIO:
 
     @staticmethod
     def load(path: str | Path) -> EEGProcessedData:
+        """Load a processed EEG object from disk."""
         path = Path(path)
 
         raw_path = path / EEGProcessedDataIO.RAW_FILENAME

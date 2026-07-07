@@ -1,15 +1,19 @@
-from .base import DecisionTree
-from features.dataset import (
-    SelectedFeaturesDataset,
-    SelectedFeature,
-    SelectedFeaturesDatasetFactory,
-    SelectedFeaturesConcatEngine,
-)
-from .score import DecisionTreeScoreEngine
 import numpy as np
+
+from features.dataset import (
+    SelectedFeature,
+    SelectedFeaturesConcatEngine,
+    SelectedFeaturesDataset,
+    SelectedFeaturesDatasetFactory,
+)
+
+from .base import DecisionTree
+from .score import DecisionTreeScoreEngine
 
 
 class FeatureForwardSelectionEngine:
+    """Forward-selection engine for decision-tree feature selection."""
+
     def __init__(
         self,
         score_engine: DecisionTreeScoreEngine,
@@ -22,6 +26,7 @@ class FeatureForwardSelectionEngine:
         self.verbose = verbose
 
     def _display(self, message: str):
+        """Display a progress message when verbose mode is enabled."""
         if self.verbose:
             print(f"\r{message}", end="", flush=True)
 
@@ -31,6 +36,7 @@ class FeatureForwardSelectionEngine:
         selected_features: list[SelectedFeature],
         feature_to_evaluate: SelectedFeature,
     ):
+        """Evaluate the score obtained by adding one candidate feature."""
         new_columns = (
             feature_to_evaluate.columns
             + SelectedFeaturesConcatEngine.concat_columns(selected_features)
@@ -51,6 +57,7 @@ class FeatureForwardSelectionEngine:
         lambda_std: float,
         iteration: int,
     ):
+        """Find the remaining feature that gives the best adjusted score."""
         best_feature = None
         best_score = None
         best_adjusted_score = -np.inf
@@ -64,13 +71,10 @@ class FeatureForwardSelectionEngine:
 
             adjusted_score = score.adjusted_score(lambda_std)
 
-            
-
             if adjusted_score > best_adjusted_score:
                 best_adjusted_score = adjusted_score
                 best_feature = feature
                 best_score = score
-                
 
         return best_feature, best_score
 
@@ -79,6 +83,7 @@ class FeatureForwardSelectionEngine:
         dataset: SelectedFeaturesDataset,
         lambda_std: float = 0,
     ):
+        """Run greedy forward feature selection."""
         selected_features = []
         remaining_features = dataset.selected_features.copy()
 
@@ -100,7 +105,6 @@ class FeatureForwardSelectionEngine:
                 selected_features.append(best_feature)
                 remaining_features.remove(best_feature)
                 current_score = adjusted_score
-                
             else:
                 break
 
@@ -109,25 +113,50 @@ class FeatureForwardSelectionEngine:
         if self.verbose:
             print()
 
-        return SelectedFeaturesDatasetFactory.from_selected_features_list(dataset, selected_features)
-
-
+        return SelectedFeaturesDatasetFactory.from_selected_features_list(
+            dataset,
+            selected_features,
+        )
 
 
 class DecisionTreeFeatureSelectionTrainer:
-    def __init__(self, score_engine:DecisionTreeScoreEngine, lambda_std:float=0, random_seed:int=42, output_test_size:float=0.2, output_val_size:float=0.3):
+    """Trainer combining forward feature selection, dataset splitting, and tree training."""
+
+    def __init__(
+        self,
+        score_engine: DecisionTreeScoreEngine,
+        lambda_std: float = 0,
+        random_seed: int = 42,
+        output_test_size: float = 0.2,
+        output_val_size: float = 0.3,
+    ):
         self.score_engine = score_engine
         self.lambda_std = lambda_std
         self.random_seed = random_seed
         self.output_test_size = output_test_size
         self.output_val_size = output_val_size
-        
 
-    def train(self, decision_tree:DecisionTree, dataset:SelectedFeaturesDataset):
-        feature_selector = FeatureForwardSelectionEngine(self.score_engine, decision_tree)
+    def train(
+        self,
+        decision_tree: DecisionTree,
+        dataset: SelectedFeaturesDataset,
+    ):
+        """Select features, split the dataset, and train the decision tree."""
+        feature_selector = FeatureForwardSelectionEngine(
+            self.score_engine,
+            decision_tree,
+        )
 
         selected_dataset = feature_selector.run(dataset, self.lambda_std)
-        train_dataset, val_dataset, test_dataset = selected_dataset.selector.group_train_val_test_split(random_state=self.random_seed, test_size=self.output_test_size, val_size=self.output_val_size)
+
+        train_dataset, val_dataset, test_dataset = (
+            selected_dataset.selector.group_train_val_test_split(
+                random_state=self.random_seed,
+                test_size=self.output_test_size,
+                val_size=self.output_val_size,
+            )
+        )
+
         trained_tree = decision_tree.train(train_dataset)
 
         return trained_tree, val_dataset, test_dataset

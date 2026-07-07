@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-
 import numpy as np
-from maths.tools import EmbeddingTools
 from scipy.spatial.distance import cdist
+
+from maths.tools import EmbeddingTools
 
 
 class FractalMeasures:
-    """Mesures fractales et géométriques."""
+    """Fractal and geometrical measures."""
 
     @staticmethod
     def correlation_dimension(
@@ -16,10 +16,7 @@ class FractalMeasures:
         tau: int = 1,
         n_radii: int = 10,
     ) -> float:
-        """
-        Estimation simple de la correlation dimension par pente
-        log(C(r)) vs log(r).
-        """
+        """Estimate the correlation dimension from the slope of log(C(r)) vs log(r)."""
         y = EmbeddingTools.sliding_embed(x, emb_dim, tau)
         d = cdist(y, y, metric="euclidean")
         d = d[np.triu_indices_from(d, k=1)]
@@ -38,17 +35,17 @@ class FractalMeasures:
         c_r = np.array([(d < r).mean() for r in radii], dtype=float)
 
         mask = c_r > 0
+
         if mask.sum() < 3:
             return 0.0
 
         slope, _ = np.polyfit(np.log(radii[mask]), np.log(c_r[mask]), deg=1)
+
         return float(slope)
 
     @staticmethod
     def higuchi_fd(x: np.ndarray, kmax: int = 10) -> float:
-        """
-        Higuchi Fractal Dimension.
-        """
+        """Compute the Higuchi fractal dimension."""
         x = np.asarray(x, dtype=float)
         n = len(x)
 
@@ -57,8 +54,10 @@ class FractalMeasures:
 
         for k in k_values:
             lm = []
+
             for m in range(k):
                 idx = np.arange(m, n, k)
+
                 if len(idx) < 2:
                     continue
 
@@ -82,13 +81,12 @@ class FractalMeasures:
             np.log(lk[mask]),
             1,
         )
+
         return float(slope)
 
     @staticmethod
     def katz_fd(x: np.ndarray) -> float:
-        """
-        Katz Fractal Dimension.
-        """
+        """Compute the Katz fractal dimension."""
         x = np.asarray(x, dtype=float)
         n = len(x)
 
@@ -110,9 +108,7 @@ class FractalMeasures:
         max_chunk: int | None = None,
         n_chunks: int = 10,
     ) -> float:
-        """
-        Hurst exponent par méthode R/S.
-        """
+        """Compute the Hurst exponent using the rescaled range method."""
         x = np.asarray(x, dtype=float)
         n = len(x)
 
@@ -129,10 +125,11 @@ class FractalMeasures:
                 continue
 
             nseg = n // size
+
             if nseg < 2:
                 continue
 
-            segments = x[:nseg * size].reshape(nseg, size)
+            segments = x[: nseg * size].reshape(nseg, size)
             rs_seg = []
 
             for seg in segments:
@@ -147,7 +144,7 @@ class FractalMeasures:
             if len(rs_seg) > 0:
                 rs_vals.append(np.mean(rs_seg))
 
-        sizes = sizes[:len(rs_vals)]
+        sizes = sizes[: len(rs_vals)]
         rs_vals = np.asarray(rs_vals, dtype=float)
         mask = rs_vals > 0
 
@@ -155,4 +152,5 @@ class FractalMeasures:
             return 0.5
 
         slope, _ = np.polyfit(np.log(sizes[mask]), np.log(rs_vals[mask]), 1)
+
         return float(slope)

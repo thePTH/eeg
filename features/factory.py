@@ -15,16 +15,14 @@ from features.definitions import complexity, entropy, power_ratios, spectral, te
 from features.definitions.base import EEGExtractedFeature, RegisteredFeatureProvider
 from features.results import (
     FeatureExtractionResult,
-    PSDBandExtractionResult,
     PPCBandExtractionResult,
+    PSDBandExtractionResult,
 )
 
 
 @dataclass(frozen=True)
 class CompleteFeatureExtractionResult:
-    """
-    Bundle utilitaire quand on veut calculer les trois blocs d'un coup.
-    """
+    """Bundle returned when all feature extraction blocks are computed together."""
 
     feature_result: FeatureExtractionResult
     psd_result: PSDBandExtractionResult
@@ -32,36 +30,41 @@ class CompleteFeatureExtractionResult:
 
 
 class FeatureExtractionEngine:
-    """
-    Engine dédié aux features scalaires par canal.
-    """
+    """Engine dedicated to scalar channel-wise EEG feature extraction."""
 
     def __init__(self, config: FeatureExtractionConfig):
         self.config = config
         self._registered_features = self._resolve_registered_features()
 
     def _resolve_registered_features(self):
+        """Return the registered feature classes matching the configured categories."""
         categories_to_extract = (
             self.config.categories_to_extract
             if self.config.categories_to_extract
             else list(FeatureCategory)
         )
+
         return RegisteredFeatureProvider.get_by_categories(
             categories=categories_to_extract
         )
 
     def _build_analysis_result(self, signal: SampledSignal) -> SignalAnalysisResults:
+        """Build the complete analysis result for one sampled signal."""
         analysis_engine = SignalAnalysisEngine(signal=signal, config=self.config)
+
         return analysis_engine.compute()
 
     def _build_extraction_context(self, signal: SampledSignal) -> FeatureExtractionContext:
+        """Build the feature extraction context for one sampled signal."""
         analysis_result = self._build_analysis_result(signal)
+
         return FeatureExtractionContext(analysis_result)
 
     def _extract_features_from_context(
         self,
         context: FeatureExtractionContext,
     ) -> list[EEGExtractedFeature]:
+        """Extract all configured scalar features from a feature extraction context."""
         features_extracted: list[EEGExtractedFeature] = []
 
         for feature in self._registered_features:
@@ -71,7 +74,7 @@ class FeatureExtractionEngine:
         return features_extracted
 
     def extract(self, eeg: EEGProcessedData) -> FeatureExtractionResult:
-        # Snapshot léger pris pendant que l'EEG preprocessé est encore chargé.
+        """Extract scalar channel-wise EEG features from processed EEG data."""
         eeg_info_dico = eeg.info.to_json_dict()
 
         features_dico: dict[str, list[EEGExtractedFeature]] = {}
@@ -89,18 +92,19 @@ class FeatureExtractionEngine:
 
 
 class PSDBandExtractionEngine:
-    """
-    Engine dédié au calcul PSD agrégé par bande et par canal.
-    """
+    """Engine dedicated to channel-wise PSD band-power extraction."""
 
     def __init__(self, config: FeatureExtractionConfig):
         self.config = config
 
     def _build_analysis_result(self, signal: SampledSignal) -> SignalAnalysisResults:
+        """Build the complete analysis result for one sampled signal."""
         analysis_engine = SignalAnalysisEngine(signal=signal, config=self.config)
+
         return analysis_engine.compute()
 
     def extract(self, eeg: EEGProcessedData) -> PSDBandExtractionResult:
+        """Extract PSD band powers from processed EEG data."""
         eeg_info_dico = eeg.info.to_json_dict()
 
         band_powers_by_signal: dict[str, dict[str, float]] = {}
@@ -121,14 +125,13 @@ class PSDBandExtractionEngine:
 
 
 class PPCBandExtractionEngine:
-    """
-    Engine dédié au calcul PPC agrégé par bande.
-    """
+    """Engine dedicated to PPC band-wise connectivity extraction."""
 
     def __init__(self, config: FeatureExtractionConfig):
         self.config = config
 
     def extract(self, eeg: EEGProcessedData) -> PPCBandExtractionResult:
+        """Extract PPC connectivity matrices from processed EEG data."""
         eeg_info_dico = eeg.info.to_json_dict()
 
         params = PPCAnalysisEngineParametersFactory.build_ppc_engine_parameters(
@@ -152,15 +155,15 @@ class PPCBandExtractionEngine:
 
 class CompleteFeatureExtractionEngine:
     """
-    Orchestrateur qui calcule séparément :
-    - les features scalaires
-    - la PSD agrégée par bande
-    - la PPC par bande
+    Orchestrator computing three extraction blocks separately:
+    - scalar EEG features;
+    - PSD band powers;
+    - PPC band connectivity.
 
-    Optimisation importante
-    -----------------------
-    Lorsqu'on extrait à la fois les features scalaires et la PSD,
-    on ne calcule l'analyse du signal qu'une seule fois par canal.
+    Important optimization
+    ----------------------
+    When scalar features and PSD band powers are extracted together, signal
+    analysis is computed only once per channel.
     """
 
     def __init__(self, config: FeatureExtractionConfig):
@@ -170,6 +173,7 @@ class CompleteFeatureExtractionEngine:
         self.ppc_engine = PPCBandExtractionEngine(config)
 
     def extract(self, eeg: EEGProcessedData) -> CompleteFeatureExtractionResult:
+        """Extract scalar features, PSD band powers, and PPC matrices."""
         eeg_info_dico = eeg.info.to_json_dict()
 
         features_dico: dict[str, list[EEGExtractedFeature]] = {}

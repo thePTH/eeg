@@ -16,6 +16,8 @@ from stats.results import (
 
 
 class FDRCorrector(MultipleComparisonCorrector):
+    """Multiple-comparison corrector using the Benjamini-Hochberg FDR procedure."""
+
     method_name = "fdr_bh"
 
     def correct(
@@ -25,6 +27,7 @@ class FDRCorrector(MultipleComparisonCorrector):
         alpha: float,
         family_name: str,
     ) -> CorrectedStatisticalResultSet:
+        """Apply FDR correction to a scalar statistical result set."""
         if not result_set.is_scalar_only():
             raise TypeError(
                 "FDR correction can only be applied to scalar result sets "
@@ -32,7 +35,10 @@ class FDRCorrector(MultipleComparisonCorrector):
             )
 
         keys = result_set.keys()
-        p_values = [result_set.results[key].p_value for key in keys]
+        p_values = [
+            result_set.results[key].p_value
+            for key in keys
+        ]
 
         reject, pvals_corrected, _, _ = multipletests(
             pvals=p_values,
@@ -98,7 +104,8 @@ class FDRCorrector(MultipleComparisonCorrector):
                 )
             else:
                 raise TypeError(
-                    f"Unsupported scalar result type for FDR correction: {type(original).__name__}"
+                    f"Unsupported scalar result type for FDR correction: "
+                    f"{type(original).__name__}"
                 )
 
             corrected_results[key] = corrected

@@ -9,14 +9,14 @@ from preprocessing.step.base import PreprocessingStep
 
 class ASRStep(PreprocessingStep):
     """
-    Step ASR avec cache de calibration.
+    ASR preprocessing step with calibration caching.
 
-    Idée
-    ----
-    `ASR.fit(...)` est souvent la partie la plus coûteuse.
-    Cette implémentation permet de :
-    - calibrer une fois via `prepare(...)`
-    - réutiliser le modèle ASR ensuite sur le même sujet / enregistrement
+    Rationale
+    ---------
+    ``ASR.fit(...)`` is often the most expensive part of the process. This
+    implementation allows the model to be:
+    - calibrated once through ``prepare(...)``;
+    - reused afterwards on the same subject or recording.
     """
 
     def __init__(
@@ -45,10 +45,12 @@ class ASRStep(PreprocessingStep):
 
     @property
     def name(self) -> str:
+        """Return the preprocessing step name."""
         return "asr"
 
     @property
     def params(self) -> dict:
+        """Return the ASR configuration parameters."""
         return {
             "cutoff": self._cutoff,
             "blocksize": self._blocksize,
@@ -62,6 +64,7 @@ class ASRStep(PreprocessingStep):
         }
 
     def _build_asr(self, sfreq: float) -> ASR:
+        """Build an ASR model for a given sampling frequency."""
         return ASR(
             sfreq=sfreq,
             cutoff=self._cutoff,
@@ -75,16 +78,16 @@ class ASRStep(PreprocessingStep):
         )
 
     def _get_cache_key(self, eeg_data: EEGData) -> str:
+        """Build the cache key associated with an EEG object and ASR settings."""
         return f"asr:{eeg_data.cache_key}:{self._cutoff}:{self._blocksize}:{self._win_len}:{self._win_overlap}:{self._max_dropout_fraction}:{self._min_clean_fraction}:{self._max_bad_chans}:{self._method}"
 
     def prepare(self, eeg_data: EEGData) -> None:
-        """
-        Calibre ASR une seule fois pour cet EEG si le cache est activé.
-        """
+        """Calibrate ASR once for the given EEG object when caching is enabled."""
         if not self._enable_cache:
             return
 
         cache_key = self._get_cache_key(eeg_data)
+
         if cache_key in self._asr_cache:
             return
 
@@ -94,6 +97,7 @@ class ASRStep(PreprocessingStep):
             self._asr_cache[cache_key] = asr
 
     def clear_cache(self) -> None:
+        """Clear all cached ASR calibrations."""
         self._asr_cache.clear()
 
     def transform_raw(
@@ -102,6 +106,7 @@ class ASRStep(PreprocessingStep):
         *,
         eeg_data: EEGData | None = None,
     ) -> mne.io.Raw:
+        """Apply ASR correction to an MNE Raw object."""
         if self._enable_cache and eeg_data is not None:
             cache_key = self._get_cache_key(eeg_data)
             asr = self._asr_cache.get(cache_key)
@@ -115,4 +120,5 @@ class ASRStep(PreprocessingStep):
 
         asr = self._build_asr(float(raw.info["sfreq"]))
         asr.fit(raw)
+
         return asr.transform(raw)

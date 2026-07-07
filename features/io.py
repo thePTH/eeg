@@ -6,25 +6,27 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from features.dataset import SingleParticipantProcessedFeatureDataset, FeaturesDataset
 from eeg.data import EEGProcessedDataIO
+from features.dataset import FeaturesDataset, SingleParticipantProcessedFeatureDataset
+
 
 class SingleParticipantProcessedFeatureDatasetIO:
+    """I/O utilities for a single participant processed feature dataset."""
+
     @staticmethod
     def export(dataset: SingleParticipantProcessedFeatureDataset, path: str | Path):
         """
-        Exporte un SingleParticipantProcessedFeatureDataset dans un dossier structuré.
+        Export a SingleParticipantProcessedFeatureDataset to a structured folder.
 
-        Structure créée
-        ----------------
-        path/
-        └── sub-<id>-rec-XX/
-            ├── features.parquet
-            ├── psd_band_results.json
-            ├── ppc_band_results.json
-            └── metadata.json
+        Created structure:
+            path/
+            └── sub-<id>-rec-XX/
+                ├── features.parquet
+                ├── psd_band_results.json
+                ├── ppc_band_results.json
+                └── metadata.json
 
-        XX est automatiquement incrémenté selon les enregistrements déjà présents.
+        XX is automatically incremented according to existing recordings.
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -37,6 +39,7 @@ class SingleParticipantProcessedFeatureDatasetIO:
         for folder in path.iterdir():
             if folder.is_dir() and folder.name.startswith(subject_prefix):
                 suffix = folder.name.replace(subject_prefix, "")
+
                 if suffix.isdigit():
                     existing_indices.append(int(suffix))
 
@@ -46,18 +49,16 @@ class SingleParticipantProcessedFeatureDatasetIO:
         export_folder = path / f"{subject_prefix}{recording_key}"
         export_folder.mkdir(parents=True, exist_ok=True)
 
-        # Features
         dataset.features_df.to_parquet(export_folder / "features.parquet")
 
-        # PSD
         with open(export_folder / "psd_band_results.json", "w") as f:
             json.dump(dataset.psd_band_results, f)
 
-        # PPC: conversion explicite ndarray -> list
         ppc_json_ready = {
             band_name: dataset.ppc_matrix(band_name).tolist()
             for band_name in dataset.ppc_band_names
         }
+
         with open(export_folder / "ppc_band_results.json", "w") as f:
             json.dump(ppc_json_ready, f)
 
@@ -72,10 +73,11 @@ class SingleParticipantProcessedFeatureDatasetIO:
             json.dump(metadata, f)
 
     @staticmethod
-    def load(feature_data_path: str | Path, eeg_data_path: str | Path=None) -> SingleParticipantProcessedFeatureDataset:
-        """
-        Recharge un SingleParticipantProcessedFeatureDataset depuis un dossier exporté.
-        """
+    def load(
+        feature_data_path: str | Path,
+        eeg_data_path: str | Path = None,
+    ) -> SingleParticipantProcessedFeatureDataset:
+        """Load a SingleParticipantProcessedFeatureDataset from an exported folder."""
         feature_data_path = Path(feature_data_path)
 
         features_df = pd.read_parquet(feature_data_path / "features.parquet")
@@ -87,7 +89,6 @@ class SingleParticipantProcessedFeatureDatasetIO:
         with open(feature_data_path / "ppc_band_results.json", "r") as f:
             raw_ppc_band_results = json.load(f)
 
-        # Conversion list -> ndarray float32
         ppc_band_results = {
             band_name: np.asarray(matrix, dtype=np.float32)
             for band_name, matrix in raw_ppc_band_results.items()
@@ -95,7 +96,6 @@ class SingleParticipantProcessedFeatureDatasetIO:
 
         with open(feature_data_path / "metadata.json", "r") as f:
             metadata = json.load(f)
-
 
         eeg = None if eeg_data_path is None else EEGProcessedDataIO.load(eeg_data_path)
 
@@ -111,8 +111,11 @@ class SingleParticipantProcessedFeatureDatasetIO:
 
 
 class FeaturesDatasetIO:
+    """I/O utilities for complete feature datasets."""
+
     @staticmethod
     def export(dataset: FeaturesDataset, folder_name_path: str | Path):
+        """Export all participant feature datasets to a folder."""
         folder = Path(folder_name_path)
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -127,6 +130,7 @@ class FeaturesDatasetIO:
         feature_folder_name_path: str | Path,
         eeg_folder_name_path: str | Path | None = None,
     ) -> FeaturesDataset:
+        """Load a complete FeaturesDataset from exported participant folders."""
         participant_datasets = []
 
         feature_folder = Path(feature_folder_name_path)

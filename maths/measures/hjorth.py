@@ -1,19 +1,24 @@
 from __future__ import annotations
-from constants import EPS
 
-import numpy as np
 import math
 
+import numpy as np
+
+from constants import EPS
+
+
 class HjorthMeasures:
-    """Mesures de Hjorth."""
+    """Hjorth signal measures."""
 
     @staticmethod
     def hjorth_parameters(x: np.ndarray) -> tuple[float, float, float]:
         """
-        Retourne :
-        - activity
-        - mobility
-        - complexity
+        Compute Hjorth activity, mobility, and complexity.
+
+        Returns
+        -------
+        tuple[float, float, float]
+            Activity, mobility, and complexity.
         """
         x = np.asarray(x, dtype=float)
         dx = np.diff(x)

@@ -1,25 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from prediction.neural_network.neural_backbone.logits_aggregator import (
+    MicroLogitsToMacroProbabilityAggregator,
+)
 from rules.differentiable_rule import (
     DifferentiableDecisionRule,
     DifferentiableRuleCandidateFactory,
     TruthDegreeEngine,
 )
 
-from prediction.neural_network.neural_backbone.logits_aggregator import (
-    MicroLogitsToMacroProbabilityAggregator,
-)
-
 
 @dataclass
 class RuleEvaluationResults:
+    """Summary metrics for rule agreement and rule compliance evaluation."""
+
     rule_agreement: float
     rule_compliance: float
 
@@ -28,10 +29,12 @@ class RuleEvaluationResults:
     n_rules: int
 
     def to_dict(self) -> dict[str, float | int]:
+        """Return the evaluation results as a dictionary."""
         return asdict(self)
 
 
 class RuleEvaluator:
+    """Evaluator measuring how well model predictions follow differentiable rules."""
 
     def __init__(
         self,
@@ -40,16 +43,9 @@ class RuleEvaluator:
         macro_aggregation_method: str = "mean_probability",
         eps: float = 1e-8,
     ) -> None:
-
         self.threshold = threshold
-        self.rule_activation_threshold = (
-            rule_activation_threshold
-        )
-
-        self.macro_aggregation_method = (
-            macro_aggregation_method
-        )
-
+        self.rule_activation_threshold = rule_activation_threshold
+        self.macro_aggregation_method = macro_aggregation_method
         self.eps = eps
 
     def evaluation(
@@ -58,11 +54,9 @@ class RuleEvaluator:
         rules: list[DifferentiableDecisionRule],
         dataloader: DataLoader,
     ) -> RuleEvaluationResults:
-
+        """Evaluate rule agreement and rule compliance on a dataloader."""
         if len(rules) == 0:
-            raise ValueError(
-                "`rules` cannot be empty."
-            )
+            raise ValueError("`rules` cannot be empty.")
 
         device = torch.device(
             "cuda"
@@ -94,33 +88,22 @@ class RuleEvaluator:
                 micro_x_raws = micro_x_raws.to(device)
                 macro_x_feat = macro_x_feat.to(device)
 
-                macro_ad_proba = (
-                    self._predict_macro_ad_probability(
-                        model=model,
-                        micro_x_raws=micro_x_raws,
-                    )
+                macro_ad_proba = self._predict_macro_ad_probability(
+                    model=model,
+                    micro_x_raws=micro_x_raws,
                 )
 
                 for rule in rules:
+                    rule_weight = float(rule.score)
 
-                    rule_weight = float(
-                        rule.score
+                    truth_degree = self._compute_truth_degree(
+                        rule=rule,
+                        macro_x_feat=macro_x_feat,
                     )
 
-                    truth_degree = (
-                        self._compute_truth_degree(
-                            rule=rule,
-                            macro_x_feat=macro_x_feat,
-                        )
-                    )
-
-                    rule_class_proba = (
-                        self._get_rule_class_probability(
-                            macro_ad_proba=macro_ad_proba,
-                            predicted_class=(
-                                rule.predicted_class
-                            ),
-                        )
+                    rule_class_proba = self._get_rule_class_probability(
+                        macro_ad_proba=macro_ad_proba,
+                        predicted_class=rule.predicted_class,
                     )
 
                     rule_active = (
@@ -184,18 +167,10 @@ class RuleEvaluator:
         )
 
         return RuleEvaluationResults(
-            rule_agreement=float(
-                rule_agreement
-            ),
-            rule_compliance=float(
-                rule_compliance
-            ),
-            active_count=float(
-                agreement_denominator
-            ),
-            truth_mass=float(
-                compliance_denominator
-            ),
+            rule_agreement=float(rule_agreement),
+            rule_compliance=float(rule_compliance),
+            active_count=float(agreement_denominator),
+            truth_mass=float(compliance_denominator),
             n_rules=len(rules),
         )
 
@@ -204,19 +179,15 @@ class RuleEvaluator:
         model: nn.Module,
         micro_x_raws: torch.Tensor,
     ) -> torch.Tensor:
-
-        micro_logits = (
-            self._forward_micro_segments(
-                model=model,
-                micro_x_raws=micro_x_raws,
-            )
+        """Predict macro-level Alzheimer probability from raw micro-segments."""
+        micro_logits = self._forward_micro_segments(
+            model=model,
+            micro_x_raws=micro_x_raws,
         )
 
-        return (
-            MicroLogitsToMacroProbabilityAggregator.compute(
-                micro_logits,
-                method=self.macro_aggregation_method,
-            )
+        return MicroLogitsToMacroProbabilityAggregator.compute(
+            micro_logits,
+            method=self.macro_aggregation_method,
         )
 
     @staticmethod
@@ -224,7 +195,7 @@ class RuleEvaluator:
         model: nn.Module,
         micro_x_raws: torch.Tensor,
     ) -> torch.Tensor:
-
+        """Forward all micro-segments through the neural model."""
         if micro_x_raws.ndim != 4:
             raise ValueError(
                 "Expected micro_x_raws with shape "
@@ -254,7 +225,7 @@ class RuleEvaluator:
         rule: DifferentiableDecisionRule,
         macro_x_feat: torch.Tensor,
     ) -> torch.Tensor:
-
+        """Compute the differentiable truth degree of one rule."""
         candidate = (
             DifferentiableRuleCandidateFactory
             .from_tensor(
@@ -272,15 +243,12 @@ class RuleEvaluator:
         macro_ad_proba: torch.Tensor,
         predicted_class: str,
     ) -> torch.Tensor:
-
+        """Return the model probability associated with the rule predicted class."""
         if predicted_class == "Alzheimer":
             return macro_ad_proba
 
         if predicted_class == "Healthy":
-            return (
-                1.0
-                - macro_ad_proba
-            )
+            return 1.0 - macro_ad_proba
 
         raise ValueError(
             f"Unsupported predicted_class: "

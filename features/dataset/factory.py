@@ -6,8 +6,8 @@ import pandas as pd
 from features.factory import CompleteFeatureExtractionResult
 from features.results import (
     FeatureExtractionResult,
-    PSDBandExtractionResult,
     PPCBandExtractionResult,
+    PSDBandExtractionResult,
 )
 
 from .participant import SingleParticipantProcessedFeatureDataset
@@ -15,20 +15,19 @@ from .participant import SingleParticipantProcessedFeatureDataset
 
 class SingleParticipantProcessedFeatureDatasetFactory:
     """
-    Factory chargée de construire un
-    `SingleParticipantProcessedFeatureDataset`
-    à partir d'un résultat complet d'extraction de features.
+    Factory responsible for building a SingleParticipantProcessedFeatureDataset
+    from a complete feature extraction result.
 
-    Rôle
+    Role
     ----
-    Cette classe centralise la conversion entre les objets "résultats
-    d'extraction" du pipeline et le format dataset sujet-level utilisé
-    dans la suite du projet.
+    This class centralizes the conversion between extraction result objects
+    produced by the pipeline and the subject-level dataset format used in the
+    rest of the project.
 
-    Elle garantit notamment :
-    - une conversion cohérente des features scalaires en `DataFrame`,
-    - une conversion cohérente des PSD en dictionnaires JSON-compatibles,
-    - une conversion compacte des matrices PPC en `numpy.ndarray[float32]`.
+    It guarantees:
+    - consistent conversion of scalar features into a DataFrame;
+    - consistent conversion of PSD results into JSON-compatible dictionaries;
+    - compact conversion of PPC matrices into ``numpy.ndarray[float32]``.
     """
 
     @staticmethod
@@ -36,24 +35,18 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         complete_extraction_result: CompleteFeatureExtractionResult,
     ) -> SingleParticipantProcessedFeatureDataset:
         """
-        Construit un `SingleParticipantProcessedFeatureDataset`
-        à partir d'un résultat complet d'extraction.
+        Build a SingleParticipantProcessedFeatureDataset from a complete extraction result.
 
         Parameters
         ----------
-        complete_extraction_result:
-            Objet regroupant tous les résultats d'extraction nécessaires
-            pour un participant :
-            - features scalaires,
-            - PSD,
-            - PPC,
-            - métadonnées sujet,
-            - informations EEG.
+        complete_extraction_result
+            Object grouping all extraction results required for one participant:
+            scalar features, PSD, PPC, subject metadata, and EEG information.
 
         Returns
         -------
         SingleParticipantProcessedFeatureDataset
-            Dataset sujet-level prêt à être utilisé dans le reste du pipeline.
+            Subject-level dataset ready to be used in the rest of the pipeline.
         """
         return SingleParticipantProcessedFeatureDataset(
             features_df=SingleParticipantProcessedFeatureDatasetFactory._build_features_df(
@@ -81,25 +74,25 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         feature_result: FeatureExtractionResult,
     ) -> pd.DataFrame:
         """
-        Convertit le résultat d'extraction des features scalaires
-        en `DataFrame` de forme [channels x features].
+        Convert scalar feature extraction results to a channels-by-features DataFrame.
 
-        Choix d'implémentation
+        Implementation choices
         ----------------------
-        - on effectue une copie défensive,
-        - on convertit en `float32` pour réduire l'empreinte mémoire.
+        - A defensive copy is created.
+        - Values are converted to ``float32`` to reduce memory usage.
 
         Parameters
         ----------
-        feature_result:
-            Résultat d'extraction des features scalaires.
+        feature_result
+            Scalar feature extraction result.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame typé `float32`.
+            DataFrame with ``float32`` values.
         """
         df = feature_result.dataframe.copy()
+
         return df.astype(np.float32, copy=False)
 
     @staticmethod
@@ -107,30 +100,27 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         psd_result: PSDBandExtractionResult,
     ) -> dict[str, dict[str, float]]:
         """
-        Convertit les résultats PSD en dictionnaire de floats Python.
+        Convert PSD results to a dictionary of native Python floats.
 
-        Format de sortie
-        ----------------
+        Output format
+        -------------
         {
             "Fp1": {"delta": 0.12, "theta": 0.08, ...},
             "Fp2": {"delta": 0.10, "theta": 0.07, ...},
             ...
         }
 
-        Remarque
-        --------
-        On garde ici des `float` Python natifs, ce qui simplifie la
-        sérialisation éventuelle en JSON.
+        Native Python floats simplify potential JSON serialization.
 
         Parameters
         ----------
-        psd_result:
-            Résultat d'extraction PSD.
+        psd_result
+            PSD extraction result.
 
         Returns
         -------
         dict[str, dict[str, float]]
-            Dictionnaire PSD sérialisable simplement.
+            JSON-friendly PSD dictionary.
         """
         result: dict[str, dict[str, float]] = {}
 
@@ -147,32 +137,32 @@ class SingleParticipantProcessedFeatureDatasetFactory:
         ppc_result: PPCBandExtractionResult,
     ) -> dict[str, np.ndarray]:
         """
-        Convertit les résultats PPC en matrices numpy `float32`.
+        Convert PPC results to ``float32`` NumPy matrices.
 
-        Format de sortie
-        ----------------
+        Output format
+        -------------
         {
             "alpha": ndarray[n_channels, n_channels],
             "beta": ndarray[n_channels, n_channels],
             ...
         }
 
-        Choix d'implémentation
+        Implementation choices
         ----------------------
-        On stocke les matrices en `float32` pour :
-        - réduire l'empreinte mémoire,
-        - accélérer certaines opérations numpy,
-        - conserver un format homogène dans tout le projet.
+        Matrices are stored as ``float32`` to:
+        - reduce memory usage;
+        - speed up some NumPy operations;
+        - keep a homogeneous format across the project.
 
         Parameters
         ----------
-        ppc_result:
-            Résultat d'extraction PPC.
+        ppc_result
+            PPC extraction result.
 
         Returns
         -------
         dict[str, np.ndarray]
-            Dictionnaire de matrices PPC.
+            Dictionary of PPC matrices.
         """
         return {
             band_name: np.asarray(ppc_result.matrix(band_name), dtype=np.float32)

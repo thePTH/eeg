@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Iterable
 
 import pandas as pd
 
-from .base import FeaturesDataset
 from features.name import FeatureNameHelper
+
+from .base import FeaturesDataset
 
 if TYPE_CHECKING:
     from .participant import SingleParticipantProcessedFeatureDataset
@@ -16,20 +17,20 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class SelectedFeature:
     """
-    Représente une feature logique effectivement sélectionnée dans un
-    `SelectedFeaturesDataset`.
+    Represent a logical feature selected in a SelectedFeaturesDataset.
 
-    Exemples
+    Examples
     --------
-    - "variance"      -> plusieurs colonnes EEG
-    - "cn_alpha"      -> plusieurs colonnes de connectivité
-    - "subject_age"   -> une colonne explicative sujet
+    - "variance"    -> several EEG columns
+    - "cn_alpha"    -> several connectivity columns
+    - "subject_age" -> one subject-level explanatory column
     """
 
     name: str
     columns: list[str]
 
     def __post_init__(self) -> None:
+        """Validate and normalize selected feature columns."""
         if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("`name` must be a non-empty string.")
 
@@ -39,44 +40,50 @@ class SelectedFeature:
             )
 
         cleaned_columns: list[str] = []
+
         for column in self.columns:
             if not isinstance(column, str) or not column.strip():
                 raise ValueError(
                     f"All columns for selected feature '{self.name}' "
                     "must be non-empty strings."
                 )
+
             cleaned_columns.append(column.strip())
 
         unique_columns = list(dict.fromkeys(cleaned_columns))
         object.__setattr__(self, "columns", unique_columns)
 
     def __repr__(self):
+        """Return the selected feature name."""
         return self.name
-    
+
 
 class SelectedFeaturesConcatEngine:
+    """Utility class used to concatenate selected feature columns."""
 
     @staticmethod
-    def concat_columns(selected_features:list[SelectedFeature]) ->list[str]:
+    def concat_columns(selected_features: list[SelectedFeature]) -> list[str]:
+        """Concatenate all columns from selected features."""
         cols = []
+
         for selected_feature in selected_features:
             cols += selected_feature.columns
-        return cols
 
+        return cols
 
 
 class SelectedFeaturesDataset(FeaturesDataset):
     """
-    Vue restreinte d'un `FeaturesDataset`.
+    Restricted view of a FeaturesDataset.
 
-    Cette classe représente un dataset dont seules certaines features logiques
-    ont été retenues pour le machine learning.
+    This class represents a dataset where only selected logical features are
+    kept for machine learning.
 
     Important
     ---------
-    - L'initialisation se fait à partir de `selected_features`.
-    - `selected_columns` est entièrement déduit de `selected_features`.
-    - `wide_dataframe` n'est pas modifié : seule la vue `X` est restreinte.
+    - Initialization is based on ``selected_features``.
+    - ``selected_columns`` is entirely derived from ``selected_features``.
+    - ``wide_dataframe`` is not modified; only the ``X`` view is restricted.
     """
 
     def __init__(
@@ -85,85 +92,64 @@ class SelectedFeaturesDataset(FeaturesDataset):
         selected_features: list[SelectedFeature],
     ):
         """
+        Initialize a selected-features dataset.
+
         Parameters
         ----------
-        participant_datasets:
-            Liste non vide de datasets sujet-level.
-
-        selected_features:
-            Features logiques effectivement retenues pour le ML.
+        participant_datasets
+            Non-empty list of subject-level datasets.
+        selected_features
+            Logical features selected for machine learning.
         """
         super().__init__(participant_datasets)
 
         self._selected_features = selected_features
 
-
-
-
-
-    # ==========================================================================
-    # Représentation des features sélectionnées
-    # ==========================================================================
-
     @property
     def selected_features(self) -> list[SelectedFeature]:
-        """
-        Features logiques effectivement retenues dans cette vue restreinte.
-        """
+        """Return the logical features selected in this restricted view."""
         return self._selected_features
 
     @property
     def selected_feature_names(self) -> list[str]:
-        """
-        Noms des features logiques effectivement retenues.
-        """
-        return [feature.name for feature in self._selected_features]
+        """Return the names of the selected logical features."""
+        return [
+            feature.name
+            for feature in self._selected_features
+        ]
 
     @property
     def selected_columns(self) -> list[str]:
         """
-        Colonnes wide effectivement retenues dans cette vue restreinte.
+        Return the wide columns selected in this restricted view.
 
-        Cette propriété est entièrement déduite de `selected_features`.
+        This property is entirely derived from ``selected_features``.
         """
         columns: list[str] = []
+
         for feature in self._selected_features:
             columns.extend(feature.columns)
+
         return columns
-    
-    # ==========================================================================
-    # Colonnes effectivement retenues pour le ML
-    # ==========================================================================
 
     @cached_property
     def X(self) -> pd.DataFrame:
-        """
-        Matrice explicative restreinte aux colonnes sélectionnées.
-        """
+        """Return the explanatory matrix restricted to selected columns."""
         return self.wide_dataframe[self.selected_columns]
 
     @cached_property
     def all_feature_names(self) -> list[str]:
         """
-        Liste exacte des colonnes wide retenues dans cette vue restreinte.
+        Return the exact wide columns kept in this restricted view.
 
-        Remarque
-        --------
-        On conserve ici la convention historique du projet où
-        `all_feature_names` correspond aux noms de colonnes wide disponibles
-        dans la vue dataset courante.
+        The project convention is preserved: ``all_feature_names`` corresponds
+        to the available wide column names in the current dataset view.
         """
         return list(self.selected_columns)
 
-    # ==========================================================================
-    # Familles métier encore présentes
-    # ==========================================================================
-
     @cached_property
     def scalar_feature_names(self) -> list[str]:
-        """
-        Familles de features scalaires encore présentes dans la sélection.
-        """
+        """Return scalar feature families still present in the selection."""
         return [
             feature.name
             for feature in self._selected_features
@@ -175,9 +161,7 @@ class SelectedFeaturesDataset(FeaturesDataset):
 
     @cached_property
     def connectivity_feature_names(self) -> list[str]:
-        """
-        Familles de connectivité encore présentes dans la sélection.
-        """
+        """Return connectivity feature families still present in the selection."""
         return [
             feature.name
             for feature in self._selected_features
@@ -186,9 +170,7 @@ class SelectedFeaturesDataset(FeaturesDataset):
 
     @cached_property
     def subject_feature_names(self) -> list[str]:
-        """
-        Features sujet encore présentes dans la sélection.
-        """
+        """Return subject-level features still present in the selection."""
         return [
             feature.name
             for feature in self._selected_features
@@ -197,15 +179,12 @@ class SelectedFeaturesDataset(FeaturesDataset):
 
     @property
     def feature_names(self) -> list[str]:
-        """
-        Noms de familles métier encore disponibles dans cette vue restreinte.
-        """
+        """Return domain-level feature family names available in this view."""
         return list(self.selected_feature_names)
 
     def select_rows(self, row_indices) -> "SelectedFeaturesDataset":
         """
-        Construit une sous-vue ligne par ligne en conservant exactement les
-        mêmes features sélectionnées.
+        Build a row-level sub-view while preserving the same selected features.
         """
         if row_indices is None:
             raise ValueError("`row_indices` cannot be None.")
@@ -222,16 +201,15 @@ class SelectedFeaturesDataset(FeaturesDataset):
             participant_datasets=selected_participants,
             selected_features=self.selected_features,
         )
-    
 
     @cached_property
     def X_and_eeg(self) -> pd.DataFrame:
         """
-        Vue utile pour debug / visualisation pandas.
+        Return a DataFrame useful for debugging and visualization.
 
-        Contient :
-        - les colonnes explicatives X
-        - une colonne eeg contenant les EEGProcessedData lazy
+        It contains:
+        - explanatory columns from X;
+        - an ``eeg`` column containing lazy EEGProcessedData objects.
         """
         return pd.concat(
             [
@@ -244,29 +222,27 @@ class SelectedFeaturesDataset(FeaturesDataset):
 
 class SelectedFeaturesDatasetFactory:
     """
-    Factory de construction de `SelectedFeaturesDataset`.
+    Factory used to build SelectedFeaturesDataset objects.
 
-    Cette factory transforme une sélection exprimée au niveau métier
-    (`feature_family_names`, `channels`, `edges`) en objets `SelectedFeature`.
+    It converts a domain-level selection expressed through feature families,
+    channels, and edges into SelectedFeature objects.
     """
 
     @staticmethod
     def _unique_preserve_order(values: Iterable[str]) -> list[str]:
-        """
-        Supprime les doublons en conservant l'ordre d'apparition.
-        """
+        """Remove duplicates while preserving insertion order."""
         return list(dict.fromkeys(values))
 
     @staticmethod
     def _group_columns_by_feature_name(columns: list[str]) -> list[SelectedFeature]:
         """
-        Regroupe des colonnes wide par feature logique.
+        Group wide columns by logical feature.
 
-        Règles
-        ------
-        - subject_age         -> feature "subject_age"
-        - cn_alpha_Fp1_Fp2    -> feature "cn_alpha"
-        - Fp1_entropy         -> feature "entropy"
+        Rules
+        -----
+        - subject_age      -> feature "subject_age"
+        - cn_alpha_Fp1_Fp2 -> feature "cn_alpha"
+        - Fp1_entropy      -> feature "entropy"
         """
         if not isinstance(columns, list):
             raise TypeError("`columns` must be a list of strings.")
@@ -288,14 +264,18 @@ class SelectedFeaturesDatasetFactory:
 
             elif column.startswith("cn_"):
                 parts = column.split("_")
+
                 if len(parts) < 4:
                     raise ValueError(f"Invalid connectivity column format: '{column}'")
+
                 feature_name = f"{parts[0]}_{parts[1]}"
 
             else:
                 parts = column.split("_", 1)
+
                 if len(parts) != 2:
                     raise ValueError(f"Invalid scalar column format: '{column}'")
+
                 feature_name = parts[1]
 
             if feature_name not in grouped:
@@ -321,18 +301,23 @@ class SelectedFeaturesDatasetFactory:
         selected_columns: list[str],
     ) -> SelectedFeaturesDataset:
         """
-        Construit un `SelectedFeaturesDataset` à partir d'une liste de colonnes
-        wide déjà résolues.
+        Build a SelectedFeaturesDataset from already resolved wide columns.
         """
         if selected_columns is None:
             raise ValueError("`selected_columns` cannot be None.")
 
         selected_columns = cls._unique_preserve_order(selected_columns)
+
         if not selected_columns:
             raise ValueError("`selected_columns` cannot be empty.")
 
         available_columns = set(dataset.wide_dataframe.columns)
-        missing = [column for column in selected_columns if column not in available_columns]
+        missing = [
+            column
+            for column in selected_columns
+            if column not in available_columns
+        ]
+
         if missing:
             raise KeyError(
                 "Some selected columns do not exist in dataset.wide_dataframe: "
@@ -354,9 +339,7 @@ class SelectedFeaturesDatasetFactory:
         channels: list[str] | None = None,
         edges: list[str] | None = None,
     ) -> SelectedFeaturesDataset:
-        """
-        Construit un `SelectedFeaturesDataset` à partir d'une sélection métier.
-        """
+        """Build a SelectedFeaturesDataset from a domain-level feature selection."""
         name_factory = FeatureNameHelper(available_features=dataset.all_feature_names)
         selection = name_factory.build(
             family_names=feature_family_names,
@@ -371,7 +354,7 @@ class SelectedFeaturesDatasetFactory:
             dataset=dataset,
             selected_columns=selection,
         )
-    
+
     @classmethod
     def from_selected_features_list(
         cls,
@@ -379,8 +362,7 @@ class SelectedFeaturesDatasetFactory:
         selected_features: list[SelectedFeature],
     ) -> SelectedFeaturesDataset:
         """
-        Construit un `SelectedFeaturesDataset` directement à partir
-        d'une liste de `SelectedFeature`.
+        Build a SelectedFeaturesDataset directly from a list of SelectedFeature objects.
         """
         if selected_features is None:
             raise ValueError("`selected_features` cannot be None.")
@@ -407,18 +389,15 @@ class SelectedFeaturesDatasetFactory:
             participant_datasets=dataset.participant_datasets,
             selected_features=selected_features,
         )
-    
-
 
 
 class FeaturesDatasetSelector:
     """
-    Helper bas niveau pour construire un `SelectedFeaturesDataset`
-    à partir d'une sélection métier.
+    Low-level helper used to build a SelectedFeaturesDataset from a domain selection.
 
-    Cette classe travaille au niveau des colonnes réelles de `wide_dataframe`,
-    contrairement à d'autres helpers qui peuvent travailler au niveau des
-    familles métier (`entropy`, `cn_alpha`, `subject_age`, etc.).
+    This class works at the real ``wide_dataframe`` column level, unlike other
+    helpers that may work at the domain-family level, such as entropy,
+    cn_alpha, or subject_age.
     """
 
     @staticmethod
@@ -429,9 +408,9 @@ class FeaturesDatasetSelector:
         edges: list[str] = None,
     ) -> SelectedFeaturesDataset:
         """
-        Sélectionne un sous-dataset à partir de familles de features.
+        Select a dataset subset from feature families.
 
-        API publique conservée volontairement inchangée.
+        The public API is intentionally kept unchanged.
         """
         return SelectedFeaturesDatasetFactory.from_feature_family_names(
             dataset=dataset,

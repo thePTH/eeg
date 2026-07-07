@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-
 import numpy as np
-from maths.tools import EmbeddingTools
 from scipy.spatial.distance import cdist
 
+from maths.tools import EmbeddingTools
+
+
 class ChaosMeasures:
-    """Mesures issues de l'analyse dynamique / chaotique."""
+    """Measures derived from dynamical and chaotic signal analysis."""
 
     @staticmethod
     def lyapunov_rosenstein(
@@ -16,8 +17,23 @@ class ChaosMeasures:
         max_t: int = 20,
     ) -> float:
         """
-        Estimation simple du plus grand exposant de Lyapunov
-        (méthode de type Rosenstein).
+        Estimate the largest Lyapunov exponent using a Rosenstein-like method.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            One-dimensional input signal.
+        emb_dim : int, default=6
+            Embedding dimension.
+        tau : int, default=1
+            Delay used for state-space reconstruction.
+        max_t : int, default=20
+            Maximum divergence time.
+
+        Returns
+        -------
+        float
+            Estimated Lyapunov exponent.
         """
         y = EmbeddingTools.sliding_embed(x, emb_dim, tau)
         n = len(y)
@@ -29,6 +45,7 @@ class ChaosMeasures:
         np.fill_diagonal(dist, np.inf)
 
         theiler = max(emb_dim * tau, 5)
+
         for i in range(n):
             lo = max(0, i - theiler)
             hi = min(n, i + theiler + 1)
@@ -41,10 +58,13 @@ class ChaosMeasures:
 
         for t in range(1, max_t + 1):
             vals = []
+
             for i in range(n - t):
                 j = nn[i]
+
                 if j + t < n:
                     d = np.linalg.norm(y[i + t] - y[j + t])
+
                     if d > 0:
                         vals.append(np.log(d))
 
@@ -56,4 +76,5 @@ class ChaosMeasures:
             return 0.0
 
         slope, _ = np.polyfit(np.asarray(valid_t), np.asarray(div), 1)
+
         return float(slope)

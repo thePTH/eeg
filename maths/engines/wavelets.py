@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 import pywt
 
@@ -8,11 +9,12 @@ import pywt
 @dataclass(slots=True, frozen=True)
 class SignalWaveletAnalysisResult:
     """
-    Résultat d'analyse wavelet.
+    Container exposing wavelet analysis results.
 
-    Cette classe ne fait aucun calcul : elle expose uniquement
-    les coefficients bruts et les métriques déjà calculées.
+    This class does not perform any computation. It only stores raw
+    coefficients and metrics already computed by `SignalWaveletAnalysisEngine`.
     """
+
     coeffs: list[np.ndarray]
     packet_leaves: list[np.ndarray]
 
@@ -27,23 +29,21 @@ class SignalWaveletAnalysisResult:
 
 @dataclass(slots=True, frozen=True)
 class SignalWaveletAnalysisParameters:
+    """Parameters used by the wavelet analysis engine."""
+
     wavelet: str
     wavelet_level: int
 
 
 class SignalWaveletAnalysisEngine:
-    """
-    Moteur de calcul pour les décompositions wavelet et wavelet packet.
-    """
+    """Engine used to compute wavelet and wavelet packet decompositions."""
 
     def __init__(self, x: np.ndarray, params: SignalWaveletAnalysisParameters):
         self.x = np.asarray(x, dtype=float)
         self.params = params
 
     def _resolve_level(self) -> int:
-        """
-        Détermine un niveau de décomposition valide et robuste.
-        """
+        """Determine a valid and robust decomposition level."""
         wavelet = pywt.Wavelet(self.params.wavelet)
         max_level = pywt.dwt_max_level(len(self.x), wavelet.dec_len)
 
@@ -54,31 +54,33 @@ class SignalWaveletAnalysisEngine:
 
     @staticmethod
     def _compute_approximate_energy(coeffs: list[np.ndarray]) -> float:
-        """
-        Énergie du coefficient d'approximation principal.
-        """
+        """Compute the energy of the main approximation coefficient."""
         if len(coeffs) == 0:
             return 0.0
+
         return float(np.sum(np.square(coeffs[0])))
 
     @staticmethod
     def _compute_detail_energy(coeffs: list[np.ndarray]) -> float:
-        """
-        Somme des énergies de tous les coefficients de détail.
-        """
+        """Compute the total energy of all detail coefficients."""
         if len(coeffs) <= 1:
             return 0.0
+
         return float(sum(np.sum(np.square(cd)) for cd in coeffs[1:]))
 
     @staticmethod
     def _compute_relative_wavelet_energy(coeffs: list[np.ndarray]) -> float:
-        """
-        Énergie relative maximale parmi les coefficients de la décomposition.
-        """
+        """Compute the maximum relative energy among wavelet coefficients."""
         if len(coeffs) == 0:
             return 0.0
 
-        energies = np.asarray([np.sum(np.square(c)) for c in coeffs], dtype=float)
+        energies = np.asarray(
+            [
+                np.sum(np.square(c))
+                for c in coeffs
+            ],
+            dtype=float,
+        )
         total_energy = np.sum(energies)
 
         if total_energy == 0.0:
@@ -88,31 +90,40 @@ class SignalWaveletAnalysisEngine:
 
     @staticmethod
     def _compute_packet_approximate_energy(packet_leaves: list[np.ndarray]) -> float:
-        """
-        Énergie de la première feuille du wavelet packet.
-        """
+        """Compute the energy of the first wavelet packet leaf."""
         if len(packet_leaves) == 0:
             return 0.0
+
         return float(np.sum(np.square(packet_leaves[0])))
 
     @staticmethod
     def _compute_packet_detail_energy(packet_leaves: list[np.ndarray]) -> float:
-        """
-        Somme des énergies des feuilles de détail du wavelet packet.
-        """
+        """Compute the total energy of all wavelet packet detail leaves."""
         if len(packet_leaves) <= 1:
             return 0.0
-        return float(sum(np.sum(np.square(leaf)) for leaf in packet_leaves[1:]))
+
+        return float(
+            sum(
+                np.sum(np.square(leaf))
+                for leaf in packet_leaves[1:]
+            )
+        )
 
     @staticmethod
-    def _compute_relative_wavelet_packet_energy(packet_leaves: list[np.ndarray]) -> float:
-        """
-        Énergie relative maximale parmi les feuilles du wavelet packet.
-        """
+    def _compute_relative_wavelet_packet_energy(
+        packet_leaves: list[np.ndarray],
+    ) -> float:
+        """Compute the maximum relative energy among wavelet packet leaves."""
         if len(packet_leaves) == 0:
             return 0.0
 
-        energies = np.asarray([np.sum(np.square(leaf)) for leaf in packet_leaves], dtype=float)
+        energies = np.asarray(
+            [
+                np.sum(np.square(leaf))
+                for leaf in packet_leaves
+            ],
+            dtype=float,
+        )
         total_energy = np.sum(energies)
 
         if total_energy == 0.0:
@@ -122,8 +133,7 @@ class SignalWaveletAnalysisEngine:
 
     def compute(self) -> SignalWaveletAnalysisResult:
         """
-        Calcule les coefficients wavelet, wavelet packet,
-        ainsi que toutes les métriques dérivées.
+        Compute wavelet coefficients, wavelet packet leaves, and derived metrics.
         """
         level = self._resolve_level()
 
@@ -135,15 +145,22 @@ class SignalWaveletAnalysisEngine:
             mode="symmetric",
             maxlevel=level,
         )
-        packet_leaves = [node.data for node in wp.get_level(level, order="freq")]
+        packet_leaves = [
+            node.data
+            for node in wp.get_level(level, order="freq")
+        ]
 
         approximate_energy = self._compute_approximate_energy(coeffs)
         detail_energy = self._compute_detail_energy(coeffs)
         relative_wavelet_energy = self._compute_relative_wavelet_energy(coeffs)
 
-        packet_approximate_energy = self._compute_packet_approximate_energy(packet_leaves)
+        packet_approximate_energy = self._compute_packet_approximate_energy(
+            packet_leaves
+        )
         packet_detail_energy = self._compute_packet_detail_energy(packet_leaves)
-        relative_wavelet_packet_energy = self._compute_relative_wavelet_packet_energy(packet_leaves)
+        relative_wavelet_packet_energy = self._compute_relative_wavelet_packet_energy(
+            packet_leaves
+        )
 
         return SignalWaveletAnalysisResult(
             coeffs=coeffs,

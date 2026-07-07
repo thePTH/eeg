@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
+
 from maths.tools import SignalTools
+
 
 @dataclass(slots=True, frozen=True)
 class SignalStatisticsAnalysisResult:
     """
-    Résultat exposant les statistiques élémentaires d'un signal.
+    Container exposing elementary signal statistics.
 
-    Cette classe ne calcule rien. Elle se contente d'exposer des valeurs
-    déjà calculées par `SignalStatisticsEngine`.
+    This class does not perform any computation. It only stores values already
+    computed by `SignalStatisticsAnalysisEngine`.
     """
+
     n: int
     mean: float
     std: float
@@ -21,20 +25,13 @@ class SignalStatisticsAnalysisResult:
 
 
 class SignalStatisticsAnalysisEngine:
-    """
-    Moteur de calcul des statistiques élémentaires d'un signal.
-
-    Cette classe est responsable du calcul.
-    Les résultats sont encapsulés dans `SignalStatisticsResult`.
-    """
+    """Engine used to compute elementary statistics from a signal."""
 
     def __init__(self, x: np.ndarray):
         self.x = np.asarray(x, dtype=float)
 
     def compute(self) -> SignalStatisticsAnalysisResult:
-        """
-        Calcule les statistiques de base du signal.
-        """
+        """Compute basic signal statistics."""
         n = len(self.x)
         mean = float(np.mean(self.x))
         std = float(np.std(self.x, ddof=1)) if n > 1 else 0.0

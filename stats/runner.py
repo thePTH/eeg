@@ -14,20 +14,19 @@ from stats.results import StatisticalAnalysisOutcome, StatisticalResultSet
 
 class StatisticalTestRunner:
     """
-    Point d'entrée unique du framework statistique.
+    Main entry point of the statistical framework.
 
-    Philosophie
-    -----------
-    1. La query décrit l'intention métier.
-    2. Le factory construit les bundles.
-    3. L'engine applique le test principal.
-    4. Le runner applique éventuellement :
-       - une correction multiple
-       - un post-hoc
+    Workflow:
+    1. The query describes the domain-level intent.
+    2. The factory builds the sample bundles.
+    3. The engine applies the primary statistical test.
+    4. The runner optionally applies:
+       - multiple-comparison correction;
+       - post-hoc analysis.
     """
 
     # ------------------------------------------------------------------
-    # public API
+    # Public API
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -35,6 +34,7 @@ class StatisticalTestRunner:
         query: StatisticalQuery | dict[Any, StatisticalQuery],
         dataset: FeaturesDataset,
     ) -> StatisticalAnalysisOutcome | dict[Any, StatisticalAnalysisOutcome]:
+        """Run a statistical query or a dictionary of statistical queries."""
         if isinstance(query, Mapping):
             return {
                 key: StatisticalTestRunner.run(subquery, dataset)
@@ -43,7 +43,11 @@ class StatisticalTestRunner:
 
         primary_results = StatisticalTestRunner.run_primary(query, dataset)
         corrected_results = StatisticalTestRunner._maybe_correct(query, primary_results)
-        posthoc_results = StatisticalTestRunner._maybe_run_posthoc(query, dataset, primary_results)
+        posthoc_results = StatisticalTestRunner._maybe_run_posthoc(
+            query,
+            dataset,
+            primary_results,
+        )
 
         return StatisticalAnalysisOutcome(
             primary_results=primary_results,
@@ -56,6 +60,7 @@ class StatisticalTestRunner:
         query: StatisticalQuery,
         dataset: FeaturesDataset,
     ) -> StatisticalResultSet:
+        """Run only the primary statistical test for a query."""
         engine = StatisticalTestEngineFactory.build(query)
         keys = SampleBundleFactory.list_keys(query, dataset)
 
@@ -73,7 +78,7 @@ class StatisticalTestRunner:
         )
 
     # ------------------------------------------------------------------
-    # internal helpers
+    # Internal helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -81,6 +86,7 @@ class StatisticalTestRunner:
         query: StatisticalQuery,
         primary_results: StatisticalResultSet,
     ):
+        """Apply multiple-comparison correction when requested by the query."""
         if query.correction is None:
             return None
 
@@ -88,7 +94,9 @@ class StatisticalTestRunner:
             case "fdr_bh":
                 corrector = FDRCorrector()
             case _:
-                raise ValueError(f"Unsupported correction method: {query.correction.method}")
+                raise ValueError(
+                    f"Unsupported correction method: {query.correction.method}"
+                )
 
         return corrector.correct(
             primary_results,
@@ -102,14 +110,17 @@ class StatisticalTestRunner:
         dataset: FeaturesDataset,
         primary_results: StatisticalResultSet,
     ) -> dict[str, Any] | None:
+        """Run post-hoc analysis when requested by the query."""
         posthoc_spec = getattr(query, "posthoc", None)
+
         if posthoc_spec is None:
             return None
 
         if query.test_kind != "one_way_anova":
             raise ValueError(
                 "Post-hoc is currently supported only after one_way_anova. "
-                "For two_way_anova, add a dedicated estimated-marginal-means / simple-effects layer later."
+                "For two_way_anova, add a dedicated estimated-marginal-means / "
+                "simple-effects layer later."
             )
 
         match posthoc_spec.method:
@@ -125,7 +136,10 @@ class StatisticalTestRunner:
             primary_result = primary_results.results[key]
 
             if posthoc_spec.only_if_omnibus_significant:
-                if not hasattr(primary_result, "p_value") or primary_result.p_value >= posthoc_spec.alpha:
+                if (
+                    not hasattr(primary_result, "p_value")
+                    or primary_result.p_value >= posthoc_spec.alpha
+                ):
                     continue
 
             bundle = SampleBundleFactory.build(query, dataset, key)

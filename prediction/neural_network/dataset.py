@@ -5,7 +5,7 @@ from typing import Literal
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from features.dataset import SelectedFeaturesDataset
 from prediction.decision_tree.tunning import DecisionTree
@@ -25,10 +25,13 @@ SplitStrategy = Literal["mtdnet", "random"]
 # =============================================================================
 
 class MTDNetSubjectSplitEngine:
+    """Utility class implementing the MTDNet subject-independent split."""
+
     VALID_SPLIT_MODES = {"train", "val", "test"}
 
     @staticmethod
     def normalize_subject_id(subject_id: str | int) -> str:
+        """Normalize a subject identifier to the ``sub-XXX`` format."""
         value = str(subject_id).strip()
 
         if value.startswith("sub-"):
@@ -44,7 +47,7 @@ class MTDNetSubjectSplitEngine:
         dataset_name: str = "miltiadous",
         task: str = "hc-ad",
     ) -> dict[str, list[str]]:
-
+        """Return MTDNet train, validation, and test subject identifiers."""
         dataset_name = dataset_name.lower().strip()
         task = task.lower().strip()
 
@@ -85,7 +88,7 @@ class MTDNetSubjectSplitEngine:
         dataset_name: str = "miltiadous",
         task: str = "hc-ad",
     ) -> SelectedFeaturesDataset:
-
+        """Return one split of a selected-features dataset."""
         if split_mode not in cls.VALID_SPLIT_MODES:
             raise ValueError(
                 "`split_mode` must be one of "
@@ -132,7 +135,7 @@ class MTDNetSubjectSplitEngine:
         SelectedFeaturesDataset,
         SelectedFeaturesDataset,
     ]:
-
+        """Return train, validation, and test splits."""
         train_dataset = cls.split(
             features_dataset=features_dataset,
             split_mode="train",
@@ -163,6 +166,8 @@ class MTDNetSubjectSplitEngine:
 
 @dataclass(frozen=True)
 class EEGAugmentationParameters:
+    """Configuration parameters for EEG micro-segment augmentation."""
+
     p_time_flip: float = 0.5
     p_channel_shuffle: float = 0.5
     p_time_mask: float = 0.5
@@ -171,6 +176,8 @@ class EEGAugmentationParameters:
 
 @dataclass(frozen=True)
 class NeuroSymbolicEEGDataLoaderParameters:
+    """Configuration parameters for neuro-symbolic EEG datasets and dataloaders."""
+
     batch_size: int = 8
     shuffle: bool = True
     num_workers: int = 0
@@ -184,10 +191,6 @@ class NeuroSymbolicEEGDataLoaderParameters:
         default_factory=EEGAugmentationParameters
     )
 
-    # ==========================================================
-    # Split strategy
-    # ==========================================================
-
     split_strategy: SplitStrategy = "mtdnet"
 
     random_seed: int = 42
@@ -196,10 +199,6 @@ class NeuroSymbolicEEGDataLoaderParameters:
 
     mtdnet_dataset_name: str = "miltiadous"
     mtdnet_task: str = "hc-ad"
-
-    # ==========================================================
-    # Rule extraction
-    # ==========================================================
 
     decision_tree: DecisionTree | None = None
     c_tau: float = 0.1
@@ -211,6 +210,7 @@ class NeuroSymbolicEEGDataLoaderParameters:
 # =============================================================================
 
 class NeuroSymbolicEEGDataset(Dataset):
+    """PyTorch dataset returning raw EEG micro-segments, scalar features, and labels."""
 
     TARGET_MAPPING = {
         "Healthy": 0.0,
@@ -267,9 +267,18 @@ class NeuroSymbolicEEGDataset(Dataset):
         self._y = self._build_y_tensor(features_dataset)
 
     def __len__(self) -> int:
+        """Return the number of EEG samples."""
         return len(self.eegs)
 
     def __getitem__(self, index: int):
+        """
+        Return one sample.
+
+        Returns
+        -------
+        tuple
+            ``(micro_x_raws, macro_x_feat, y_true)``.
+        """
         eeg = self.eegs[index]
 
         macro_x_raw_np = np.asarray(
@@ -315,7 +324,7 @@ class NeuroSymbolicEEGDataset(Dataset):
     def _preprocess_micro_segments(
         micro_x_raws: torch.Tensor,
     ) -> torch.Tensor:
-
+        """Normalize micro-segments with MTDNet-style preprocessing."""
         channel_mean = micro_x_raws.mean(dim=2, keepdim=True)
         x = micro_x_raws - channel_mean
 
@@ -334,7 +343,7 @@ class NeuroSymbolicEEGDataset(Dataset):
         self,
         micro_x_raws: torch.Tensor,
     ) -> torch.Tensor:
-
+        """Apply random training-time augmentations to micro-segments."""
         params = self.params.augmentation_params
         x = micro_x_raws.clone()
 
@@ -362,7 +371,7 @@ class NeuroSymbolicEEGDataset(Dataset):
     def _build_x_feat_tensor(
         features_dataset: SelectedFeaturesDataset,
     ) -> torch.Tensor:
-
+        """Build the scalar feature tensor."""
         X = features_dataset.X
 
         non_numeric_columns = [
@@ -392,7 +401,7 @@ class NeuroSymbolicEEGDataset(Dataset):
         cls,
         features_dataset: SelectedFeaturesDataset,
     ) -> torch.Tensor:
-
+        """Build the binary target tensor."""
         y = features_dataset.y.to_numpy()
 
         unknown_labels = [
@@ -424,6 +433,7 @@ class NeuroSymbolicEEGDataset(Dataset):
 # =============================================================================
 
 class NeuroSymbolicEEGDataloaderFactory:
+    """Factory used to build neuro-symbolic EEG dataloaders and rules."""
 
     @staticmethod
     def _split_dataset(
@@ -434,7 +444,7 @@ class NeuroSymbolicEEGDataloaderFactory:
         SelectedFeaturesDataset,
         SelectedFeaturesDataset,
     ]:
-
+        """Split a selected-features dataset according to the configured strategy."""
         if params.split_strategy == "mtdnet":
             return MTDNetSubjectSplitEngine.split_all(
                 features_dataset=features_dataset,
@@ -459,14 +469,14 @@ class NeuroSymbolicEEGDataloaderFactory:
         train_dataset: SelectedFeaturesDataset,
         params: NeuroSymbolicEEGDataLoaderParameters,
     ) -> list[DifferentiableDecisionRule]:
-
+        """Train the configured decision tree and extract differentiable rules."""
         if params.decision_tree is None:
             raise ValueError(
                 "`params.decision_tree` cannot be None when calling "
                 "`build_all`, because rules must be extracted from a tree "
                 "trained on the train split."
             )
-        
+
         trained_tree = params.decision_tree.train(train_dataset)
 
         differentiable_rules, _ = DifferentiableDecisionRulesFactory.build(
@@ -490,14 +500,13 @@ class NeuroSymbolicEEGDataloaderFactory:
         split_mode: SplitMode = "train",
     ) -> DataLoader:
         """
-        Construit uniquement un DataLoader.
+        Build one DataLoader.
 
         Important
         ---------
-        Cette méthode ne fait aucun split.
-        Le dataset reçu doit déjà correspondre au split souhaité.
+        This method does not split the dataset. The input dataset must already
+        correspond to the requested split.
         """
-
         if params is None:
             params = NeuroSymbolicEEGDataLoaderParameters()
 
@@ -527,18 +536,20 @@ class NeuroSymbolicEEGDataloaderFactory:
         DataLoader,
     ]:
         """
-        Pipeline complet :
+        Run the full dataloader and rule-extraction pipeline.
 
-        1. Split du SelectedFeaturesDataset.
-        2. Entraînement de l'arbre sur train_dataset uniquement.
-        3. Extraction des règles différentiables.
-        4. Construction des DataLoaders.
+        Steps
+        -----
+        1. Split the SelectedFeaturesDataset.
+        2. Train the decision tree on the training split only.
+        3. Extract differentiable rules.
+        4. Build train, validation, and test DataLoaders.
 
-        Retourne
-        --------
-        rules, train_loader, val_loader, test_loader
+        Returns
+        -------
+        tuple
+            ``rules, train_loader, val_loader, test_loader``.
         """
-
         if params is None:
             params = NeuroSymbolicEEGDataLoaderParameters()
 

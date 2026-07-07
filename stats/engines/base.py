@@ -20,21 +20,22 @@ from stats.results import (
 
 
 class StatisticalTestEngine(ABC):
-    """
-    Un engine sait appliquer une formule statistique à un SampleBundle.
-    """
+    """Base engine able to apply a statistical formula to a sample bundle."""
 
     test_name: str
 
     @abstractmethod
     def compute(self, bundle: SampleBundle, *, target: str, key: str) -> StatisticalResult:
+        """Compute the statistical test on a sample bundle."""
         raise NotImplementedError
 
     @staticmethod
     def _to_numeric_series(values: pd.Series | list[float] | np.ndarray) -> pd.Series:
+        """Convert input values to a clean numeric pandas Series."""
         s = pd.Series(values)
         s = pd.to_numeric(s, errors="coerce")
         s = s.dropna()
+
         return s
 
     def _build_pairwise_result(
@@ -47,6 +48,7 @@ class StatisticalTestEngine(ABC):
         key: str,
         metadata: dict[str, Any] | None = None,
     ) -> PairwiseStatisticalResult:
+        """Build a pairwise statistical result from a pairwise sample bundle."""
         if isinstance(bundle, GroupComparisonSampleBundle):
             n_x = bundle.n_x
             n_y = bundle.n_y
@@ -81,6 +83,7 @@ class StatisticalTestEngine(ABC):
         eta_squared: float | None,
         metadata: dict[str, Any] | None = None,
     ) -> OneWayANOVAResult:
+        """Build a one-way ANOVA result from an ANOVA sample bundle."""
         return OneWayANOVAResult(
             statistic=float(statistic),
             p_value=float(p_value),

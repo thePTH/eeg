@@ -1,21 +1,18 @@
 from features.factory import FeatureExtractionResult
-import mne
-import matplotlib.pyplot as plt
-import numpy as np
 
-import numpy as np
 import matplotlib.pyplot as plt
 import mne
+import numpy as np
 
 
 class TopomapFactory:
     """
-    Fabrique utilitaire pour afficher des topomaps EEG à partir :
-    - d'un vecteur de valeurs par canal
-    - d'un objet MNE Info (ou d'un dict JSON pour le reconstruire)
+    Utility factory for plotting EEG topomaps from:
+    - a vector of channel-wise values;
+    - an MNE Info object, or a JSON-compatible dictionary used to reconstruct it.
 
-    Cette classe ne stocke pas d'état métier : elle sert uniquement
-    à centraliser la logique de visualisation.
+    This class does not store domain state. It only centralizes visualization
+    logic.
     """
 
     @staticmethod
@@ -28,47 +25,45 @@ class TopomapFactory:
         contours: int = 7,
         cmap: str = "RdBu_r",
         vlim: tuple = None,
-        sensors: bool = True
+        sensors: bool = True,
     ):
         """
-        Affiche une topomap EEG.
+        Plot an EEG topomap.
 
         Parameters
         ----------
         values : array-like
-            Tableau 1D de taille (n_channels,) contenant une valeur par canal.
+            One-dimensional array of shape ``(n_channels,)`` containing one
+            value per EEG channel.
         eeg_info : mne.Info or dict
-            Objet MNE Info, ou dictionnaire JSON-compatible permettant
-            de le reconstruire avec `mne.Info.from_json_dict`.
+            MNE Info object, or JSON-compatible dictionary that can be
+            reconstructed with ``mne.Info.from_json_dict``.
         title : str, optional
-            Titre principal de la figure.
+            Main figure title.
         sub_title : str, optional
-            Sous-titre affiché en bas de la figure.
+            Subtitle displayed at the bottom of the figure.
         figsize : tuple, default=(7, 6)
-            Taille de la figure.
+            Figure size.
         contours : int, default=7
-            Nombre de lignes de contour.
+            Number of contour lines.
         cmap : str, default="RdBu_r"
-            Colormap utilisée.
+            Colormap used for the topomap.
         vlim : tuple, optional
-            Bornes (vmin, vmax). Si None, elles sont calculées automatiquement.
+            Color limits ``(vmin, vmax)``. If None, limits are computed
+            automatically.
         sensors : bool, default=True
-            Si True, affiche les positions des électrodes.
-        show : bool, default=True
-            Si True, appelle plt.show().
+            Whether to display electrode positions.
 
         Returns
         -------
         fig, ax
-            Figure et axe matplotlib.
+            Matplotlib figure and axes.
         """
-        # Reconstruction éventuelle de l'objet Info
         if isinstance(eeg_info, dict):
             info = mne.Info.from_json_dict(eeg_info)
         else:
             info = eeg_info
 
-        # Conversion robuste en numpy array 1D
         values = np.asarray(values)
 
         if values.ndim != 1:
@@ -78,13 +73,13 @@ class TopomapFactory:
             )
 
         n_channels = len(info["ch_names"])
+
         if len(values) != n_channels:
             raise ValueError(
                 f"Incohérence entre `values` et `eeg_info` : "
                 f"{len(values)} valeurs fournies pour {n_channels} canaux EEG."
             )
 
-        # Bornes de couleur
         if vlim is None:
             vmin = np.nanmin(values)
             vmax = np.nanmax(values)
@@ -123,9 +118,3 @@ class TopomapFactory:
             )
 
         plt.show()
-
-
-
-
-
-

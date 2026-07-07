@@ -13,12 +13,15 @@ from prediction.decision_tree.base import TrainedDecisionTree
 
 
 class DecisionOperator(str, Enum):
+    """Comparison operators used in decision rules."""
+
     GREATER = ">"
     LOWER = "<"
     GREATER_EQUAL = ">="
     LOWER_EQUAL = "<="
 
     def apply(self, left_value: float, right_value: float) -> bool:
+        """Apply the operator to two numeric values."""
         match self:
             case DecisionOperator.GREATER:
                 return left_value > right_value
@@ -33,22 +36,28 @@ class DecisionOperator(str, Enum):
 
 
 class Rule(ABC):
-    """Classe mère de toutes les règles évaluables."""
+    """Base class for all evaluable rules."""
+
     pass
 
 
 @dataclass(frozen=True)
 class Condition(Rule):
+    """Single threshold-based condition extracted from a decision tree."""
+
     feature_name: str
     threshold: float
     operator: DecisionOperator
 
     def __str__(self) -> str:
+        """Return a human-readable condition."""
         return f"{self.feature_name} {self.operator.value} {self.threshold}"
 
 
 @dataclass
 class DecisionRule(Rule):
+    """Decision rule represented as a conjunction of conditions."""
+
     predicted_class: str
     prediction_probability: float
     support: int
@@ -56,6 +65,7 @@ class DecisionRule(Rule):
     conditions: list[Condition]
 
     def __str__(self) -> str:
+        """Return a human-readable decision rule."""
         conds = "\n  AND ".join(str(rule) for rule in self.conditions)
 
         return (
@@ -66,14 +76,18 @@ class DecisionRule(Rule):
         )
 
     def __repr__(self) -> str:
+        """Return the string representation of the decision rule."""
         return self.__str__()
 
 
 @dataclass(frozen=True)
 class RuleCheckerCandidate:
+    """Candidate sample used to evaluate rules."""
+
     values: dict[str, Any]
 
     def get_value(self, feature_name: str) -> Any:
+        """Return the value associated with a feature name."""
         if feature_name not in self.values:
             raise KeyError(f"Missing feature in candidate: {feature_name}")
 
@@ -81,8 +95,11 @@ class RuleCheckerCandidate:
 
 
 class RuleCheckerCandidateFactory:
+    """Factory used to build rule-checker candidates from common data structures."""
+
     @staticmethod
     def from_dataframe(candidate: pd.DataFrame) -> RuleCheckerCandidate:
+        """Build a candidate from a one-row DataFrame."""
         if len(candidate) != 1:
             raise ValueError(
                 "RuleCheckerCandidateFactory.from_dataframe expects "
@@ -95,20 +112,25 @@ class RuleCheckerCandidateFactory:
 
     @staticmethod
     def from_series(candidate: pd.Series) -> RuleCheckerCandidate:
+        """Build a candidate from a pandas Series."""
         return RuleCheckerCandidate(
             values=candidate.to_dict()
         )
 
     @staticmethod
     def from_dict(candidate: dict[str, Any]) -> RuleCheckerCandidate:
+        """Build a candidate from a dictionary."""
         return RuleCheckerCandidate(
             values=dict(candidate)
         )
 
 
 class DecisionRuleChecker:
+    """Utility class used to evaluate rules on candidates."""
+
     @staticmethod
     def check(rule: Rule, candidate: RuleCheckerCandidate) -> bool:
+        """Evaluate a rule on a candidate sample."""
         if isinstance(rule, Condition):
             return DecisionRuleChecker._check_condition(
                 rule=rule,
@@ -128,6 +150,7 @@ class DecisionRuleChecker:
         rule: Condition,
         candidate: RuleCheckerCandidate,
     ) -> bool:
+        """Evaluate a single condition on a candidate sample."""
         feature_value = candidate.get_value(rule.feature_name)
 
         return rule.operator.apply(
@@ -140,6 +163,7 @@ class DecisionRuleChecker:
         rule: DecisionRule,
         candidate: RuleCheckerCandidate,
     ) -> bool:
+        """Evaluate all conditions of a decision rule on a candidate sample."""
         return all(
             DecisionRuleChecker.check(
                 rule=simple_rule,
@@ -150,8 +174,11 @@ class DecisionRuleChecker:
 
 
 class DecisionRulesFactory:
+    """Factory used to extract decision rules from a trained decision tree."""
+
     @staticmethod
     def build(trained_tree: TrainedDecisionTree) -> list[DecisionRule]:
+        """Build decision rules from all leaves of a trained decision tree."""
         classifier = trained_tree.classifier
         tree = classifier.tree_
 
@@ -166,6 +193,7 @@ class DecisionRulesFactory:
             node_id: int,
             current_rules: list[Condition],
         ) -> None:
+            """Recursively traverse the tree and collect leaf rules."""
             feature_index = tree.feature[node_id]
 
             if feature_index == _tree.TREE_UNDEFINED:

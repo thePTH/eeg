@@ -9,22 +9,17 @@ from features.dataset import SelectedFeaturesDataset
 
 class TorchHelper:
     """
-    Helper de conversion vers des tenseurs PyTorch compatibles avec le modèle NeSy.
+    Helper for converting project objects to PyTorch tensors compatible with
+    the neuro-symbolic model.
 
     Conventions
     -----------
-    x_raw:
-        shape [batch_size, n_channels, n_times]
+    x_raw
+        Tensor with shape ``[batch_size, n_channels, n_times]``.
 
-    x_feat:
-        shape [n_samples, n_features]
+    x_feat
+        Tensor with shape ``[n_samples, n_features]``.
     """
-
-   
-
-    # ============================================================
-    # x_raw - cas batch
-    # ============================================================
 
     @staticmethod
     def eeg_to_tensor(
@@ -34,14 +29,13 @@ class TorchHelper:
         device: torch.device | str | None = None,
     ) -> torch.Tensor:
         """
-        Convertit une liste de EEGProcessedData en batch x_raw.
+        Convert a list of EEGProcessedData objects into an ``x_raw`` batch.
 
         Returns
         -------
         torch.Tensor
-            Shape [batch_size, n_channels, n_times]
+            Tensor with shape ``[batch_size, n_channels, n_times]``.
         """
-
         if not eegs:
             raise ValueError("`eegs` cannot be empty.")
 
@@ -75,10 +69,6 @@ class TorchHelper:
             device=device,
         )
 
-    # ============================================================
-    # x_feat
-    # ============================================================
-
     @staticmethod
     def features_dataset_to_tensor(
         dataset: SelectedFeaturesDataset,
@@ -87,17 +77,15 @@ class TorchHelper:
         device: torch.device | str | None = None,
     ) -> torch.Tensor:
         """
-        Convertit un SelectedFeaturesDataset en tenseur PyTorch x_feat.
+        Convert a SelectedFeaturesDataset into a PyTorch ``x_feat`` tensor.
 
         Returns
         -------
         torch.Tensor
-            Shape [n_samples, n_features]
+            Tensor with shape ``[n_samples, n_features]``.
         """
-
         X = dataset.X
 
-        # Vérification : uniquement numérique
         non_numeric_columns = [
             col for col in X.columns
             if not np.issubdtype(X[col].dtype, np.number)
@@ -121,35 +109,42 @@ class TorchHelper:
             dtype=dtype,
             device=device,
         )
-    
-
-
-
-import torch
-import torch.nn.functional as F
-
-
-    
-
-
-
 
 
 class MacroToMicroSegmenter:
     """
-    Découpe un batch de signaux EEG macro en micro-segments.
+    Split a batch of macro EEG signals into micro-segments.
 
-    Entrée :
-    -------
-    macro_x_raw : Tensor [batch_size, n_channels, n_times_macro]
+    Input
+    -----
+    macro_x_raw
+        Tensor with shape ``[batch_size, n_channels, n_times_macro]``.
 
-    Sortie :
-    --------
-    micro_x_raw : Tensor [n_micro_segments, batch_size, n_channels, n_times_micro]
+    Output
+    ------
+    micro_x_raw
+        Tensor with shape
+        ``[n_micro_segments, batch_size, n_channels, n_times_micro]``.
     """
 
     @staticmethod
     def split(macro_x_raw: torch.Tensor, n_micro_segments: int = 60) -> torch.Tensor:
+        """
+        Split macro EEG recordings into equally sized micro-segments.
+
+        Parameters
+        ----------
+        macro_x_raw
+            Input macro EEG tensor.
+        n_micro_segments
+            Number of micro-segments to create along the time axis.
+
+        Returns
+        -------
+        torch.Tensor
+            Segmented EEG tensor with shape
+            ``[n_micro_segments, batch_size, n_channels, n_times_micro]``.
+        """
         if macro_x_raw.ndim != 3:
             raise ValueError(
                 "macro_x_raw must have shape [batch_size, n_channels, n_times_macro]. "

@@ -6,49 +6,55 @@ from .base import CorrelationQuery, FactorialQuery, GroupComparisonQuery
 @dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectGroupComparisonQuery(GroupComparisonQuery):
     """
-    Comparaison de groupes sur une variable sujet-level.
+    Statistical query for comparing a subject-level variable between two groups.
 
-    Exemples
+    Examples
     --------
-    - âge Healthy vs Alzheimer
-    - MMSE Healthy vs Alzheimer
+    - Age: Healthy vs Alzheimer
+    - MMSE: Healthy vs Alzheimer
     """
+
     variable: str
 
     @property
     def target_name(self) -> str:
+        """Return the target subject-level variable."""
         return self.variable
 
 
 @dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectCorrelationQuery(CorrelationQuery):
     """
-    Corrélation entre deux variables sujet-level.
+    Statistical query for correlating two subject-level variables.
 
-    Exemple
+    Example
     -------
     - age vs mmse
     """
+
     x_variable: str
     y_variable: str
 
     @property
     def target_name(self) -> str:
+        """Return the primary target variable."""
         return self.x_variable
 
 
 @dataclass(frozen=True, kw_only=True, repr=False)
 class SubjectFactorialQuery(FactorialQuery):
     """
-    Analyse factorielle sur variable sujet-level.
+    Statistical query for factorial analysis of a subject-level variable.
 
-    Exemples
+    Examples
     --------
     - subject_mmse ~ subject_health
     - subject_mmse ~ subject_health * subject_gender
     """
+
     variable: str
 
     @property
     def target_name(self) -> str:
+        """Return the target subject-level variable."""
         return self.variable

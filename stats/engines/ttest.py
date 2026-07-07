@@ -7,12 +7,15 @@ from stats.engines.base import StatisticalTestEngine
 
 
 class TTestEngine(StatisticalTestEngine):
+    """Engine used to compute an independent two-sample t-test."""
+
     test_name = "t-test"
 
     def __init__(self, equal_var: bool = False):
         self.equal_var = equal_var
 
     def compute(self, bundle: SampleBundle, *, target: str, key: str):
+        """Compute an independent two-sample t-test from a group-comparison bundle."""
         if not isinstance(bundle, GroupComparisonSampleBundle):
             raise TypeError("TTestEngine expects a GroupComparisonSampleBundle")
 

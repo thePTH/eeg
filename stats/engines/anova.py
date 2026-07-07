@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.stats import f_oneway
 import statsmodels.api as sm
+from scipy.stats import f_oneway
 from statsmodels.formula.api import ols
 
 from stats.bundles import OneWayANOVASampleBundle, SampleBundle, TwoWayANOVASampleBundle
@@ -12,9 +12,12 @@ from stats.results import FactorialEffectResult, TwoWayANOVAResult
 
 
 class OneWayANOVAEngine(StatisticalTestEngine):
+    """Engine used to compute a one-way ANOVA."""
+
     test_name = "one-way-anova"
 
     def compute(self, bundle: SampleBundle, *, target: str, key: str):
+        """Compute a one-way ANOVA from a one-way ANOVA sample bundle."""
         if not isinstance(bundle, OneWayANOVASampleBundle):
             raise TypeError("OneWayANOVAEngine expects a OneWayANOVASampleBundle")
 
@@ -25,20 +28,21 @@ class OneWayANOVAEngine(StatisticalTestEngine):
             }
         ).dropna()
 
-        grouped = [group_df["value"].to_numpy() for _, group_df in df.groupby("group")]
+        grouped = [
+            group_df["value"].to_numpy()
+            for _, group_df in df.groupby("group")
+        ]
 
         if len(grouped) < 2:
             raise ValueError("One-way ANOVA requires at least two non-empty groups")
 
         statistic, p_value = f_oneway(*grouped)
 
-        # Degrees of freedom
         k = len(grouped)
         n = int(len(df))
         df_between = k - 1
         df_within = n - k
 
-        # eta-squared
         grand_mean = float(df["value"].mean())
         ss_between = 0.0
         ss_total = float(((df["value"] - grand_mean) ** 2).sum())
@@ -49,6 +53,7 @@ class OneWayANOVAEngine(StatisticalTestEngine):
             ss_between += n_g * (mean_g - grand_mean) ** 2
 
         eta_squared = None
+
         if ss_total > 0:
             eta_squared = ss_between / ss_total
 
@@ -65,9 +70,12 @@ class OneWayANOVAEngine(StatisticalTestEngine):
 
 
 class TwoWayANOVAEngine(StatisticalTestEngine):
+    """Engine used to compute a two-way ANOVA."""
+
     test_name = "two-way-anova"
 
     def compute(self, bundle: SampleBundle, *, target: str, key: str):
+        """Compute a two-way ANOVA from a two-way ANOVA sample bundle."""
         if not isinstance(bundle, TwoWayANOVASampleBundle):
             raise TypeError("TwoWayANOVAEngine expects a TwoWayANOVASampleBundle")
 
