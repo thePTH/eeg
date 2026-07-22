@@ -11,7 +11,7 @@ class ExperimentConfig:
 
     random_seed: int = 42
 
-    dataset_folder: str = "computed_features/dethamp"
+    dataset_folder: str = "computed_features/asr"
     dataset_name: str = "raw_data"
 
     target_health_states: tuple[str, ...] = ("AD", "CN")

@@ -142,12 +142,7 @@ class EEGExperimentRunner:
     def build_decision_tree(self) -> DecisionTree:
 
         decision_tree = DecisionTree(
-            parameters=DecisionTreeParameters(
-                criterion="gini",
-                max_depth=5,
-                min_samples_split=2,
-                min_samples_leaf=10,
-            )
+            parameters=DecisionTreeParameters(criterion='entropy', max_depth=5, min_samples_split=10, min_samples_leaf=2) #for asr dataset only
         )
 
         self.logger.info(
