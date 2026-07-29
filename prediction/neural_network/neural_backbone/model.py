@@ -196,17 +196,9 @@ class MultiScaleDeepEEGNet(nn.Module):
         torch.Tensor
             Logits with shape ``[batch_size, out_nch]``.
         """
-        batch_size, _, n_times = inpt.shape
-
-        if n_times % 10 != 0:
-            raise ValueError(
-                "`n_times` must be divisible by 10 for the current multi-scale "
-                f"architecture. Got n_times={n_times}."
-            )
-
+       
         x = self.multiscaleFE(inpt)
-
-        x = x.view(batch_size, n_times // 10, -1).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
 
         lstm_out, _ = self.lstm(x)
 

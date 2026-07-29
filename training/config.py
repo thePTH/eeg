@@ -11,8 +11,8 @@ class ExperimentConfig:
 
     random_seed: int = 42
 
-    dataset_folder: str = "computed_features/asr"
-    dataset_name: str = "raw_data"
+    dataset_folder: str = "brainlat_computed_features/asr"
+    dataset_name: str = "brainlat_raw_data"
 
     target_health_states: tuple[str, ...] = ("AD", "CN")
 

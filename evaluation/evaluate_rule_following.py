@@ -63,8 +63,8 @@ def parse_model_name(model_path: Path):
 
 def load_dataset():
     dataset = FeaturesDatasetIO.load(
-        "computed_features/dethamp",
-        "raw_data",
+        "brainlat_computed_features/dethamp",
+        "brainlat_raw_data",
     )
 
     dataset = dataset.selector.filter_by_healthstate(
@@ -87,12 +87,7 @@ def load_dataset():
 
 def build_decision_tree():
     return DecisionTree(
-        parameters=DecisionTreeParameters(
-            criterion="gini",
-            max_depth=5,
-            min_samples_split=2,
-            min_samples_leaf=10,
-        )
+        parameters=DecisionTreeParameters(criterion='entropy', max_depth=5, min_samples_split=2, min_samples_leaf=5)
     )
 
 

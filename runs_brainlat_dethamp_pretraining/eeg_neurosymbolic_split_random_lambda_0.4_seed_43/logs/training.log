@@ -1,0 +1,18 @@
+2026-07-25 18:48:07,566 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | ================================================================================
+2026-07-25 18:48:07,567 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Starting run: eeg_neurosymbolic_split_random_lambda_0.4_seed_43
+2026-07-25 18:48:07,567 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Split strategy: random
+2026-07-25 18:48:07,567 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Lambda logic: 0.4000
+2026-07-25 18:48:07,567 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Seed: 43
+2026-07-25 18:48:07,567 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | ================================================================================
+2026-07-25 18:48:07,568 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Random seed fixed to 43
+2026-07-25 18:48:07,568 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Using device: cpu
+2026-07-25 18:48:07,568 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Loading dataset
+2026-07-25 18:48:09,497 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Dataset loaded and selected
+2026-07-25 18:48:09,497 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Decision tree initialized
+2026-07-25 18:48:09,576 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Dataloaders created
+2026-07-25 18:48:09,576 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Number of selected rules: 2
+2026-07-25 18:48:09,583 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Model initialized
+2026-07-25 21:08:00,385 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Model saved to runs/eeg_neurosymbolic_split_random_lambda_0.4_seed_43/checkpoints/model.pt
+2026-07-25 21:08:00,385 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | History saved to runs/eeg_neurosymbolic_split_random_lambda_0.4_seed_43/outputs/history.npy
+2026-07-25 21:08:00,386 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Test metrics: {'test_total_loss': 0.5519768622788516, 'test_normalized_logic_loss': 0.6197020641782067, 'test_balanced_accuracy': 0.9285714285714286, 'test_f1_score': 0.923076923076923}
+2026-07-25 21:08:00,386 | INFO | eeg_neurosymbolic_split_random_lambda_0.4_seed_43 | Run finished successfully

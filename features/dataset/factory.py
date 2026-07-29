@@ -67,6 +67,8 @@ class SingleParticipantProcessedFeatureDatasetFactory:
             eeg_info_dico=dict(
                 complete_extraction_result.feature_result.eeg_info_dico
             ),
+
+            _eeg=complete_extraction_result.feature_result.eeg
         )
 
     @staticmethod

@@ -246,7 +246,12 @@ class EEGProcessedData(EEGData):
     def source(self) -> EEGData:
         """Return the source EEG object used to create this processed EEG."""
         return self._source
-
+    
+    @property
+    def subject(self) -> Participant :
+        return self.source.subject
+    
+    
     @property
     def cache_key(self) -> str:
         """Return a cache key based on the source and pipeline name."""
